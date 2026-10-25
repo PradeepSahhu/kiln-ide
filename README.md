@@ -85,6 +85,17 @@ More in [Screenshots](#screenshots).
   a base branch, diff viewer, blame, Git log and console.
 
 **Claude and AI agents**
+- **AI code completion**: ghost text as you type (Tab accepts; Alt+\\ asks at the caret).
+- **Commit messages written from the diff** of the selected files (the sparkle button in the Commit window),
+  and **Review** before committing: Claude lists likely bugs with file and line, then you commit or fix.
+- **Generate Documentation** and **Generate Tests** for the function, method or class at the caret (Code menu),
+  with a preview of the change before anything is written. Tests go where the project keeps them (pytest,
+  node:test / Jest / Vitest / Mocha, xUnit).
+- **Explain Exception**: a failed test, an exception the debugger stopped at, or a copied stack trace goes to
+  the Claude chat together with the project code at each frame.
+- The AI features use Claude Opus 5.5 by default (Settings › Claude; Claude Haiku 5.5 is the fastest for
+  completion). With `ANTHROPIC_API_KEY` set they call the Anthropic API directly, which is fastest, with
+  refusal fallbacks on; otherwise they go through Claude Code with your Claude login.
 - Claude chat that writes, updates and patches files: tool calls, diffs and permission prompts appear in the
   chat; edited files open and update in the editor in real time; rewind to any message; resume sessions.
 - All available skills, slash commands, agents and MCP servers in the Skills window.
@@ -260,6 +271,25 @@ background, so agents can compare.
 
 ![Claude chat](docs/screenshots/claude.png)
 
+**AI code completion.** Ghost text at the caret; Tab accepts it.
+
+![AI code completion](docs/screenshots/inline-completion.png)
+
+**Generate Documentation.** A preview of the docstring Claude wrote for the function at the caret, applied only
+when you choose Apply.
+
+![Generate Documentation preview](docs/screenshots/generate-docs.png)
+
+**Review before commit.** Claude reviews the selected changes and lists problems with file and line; open one,
+or commit anyway.
+
+![Review changes before commit](docs/screenshots/review-changes.png)
+
+**Commit message from the diff.** The sparkle button in the Commit window writes the message from the selected
+changes ("Add cube" here).
+
+![Commit message written by Claude](docs/screenshots/commit-message.png)
+
 **Skills and MCP servers.** Every skill, slash command, agent and MCP server Claude Code has, including Kiln's
 knowledge-graph server.
 
@@ -333,7 +363,8 @@ The end-to-end suite creates Python (venv), C# and JavaScript projects and check
 configurations, the terminal, commits, branch deletion, stashes, merge conflict resolution, branch changes and diffs, Go to Declaration,
 Find Usages, refactorings in Python, C# (including Roslyn through csharp-ls) and JavaScript, running and
 debugging tests from the gutter with coverage (pytest, node:test, xUnit), split editors and pinned tabs, committing
-individual lines and the Git log actions (tag, cherry-pick, revert, interactive rebase, reset), the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
+individual lines and the Git log actions (tag, cherry-pick, revert, interactive rebase, reset), the AI
+features (inline completion, Generate Documentation / Tests, review, commit message, Explain Exception), the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
 keymap customization, Search Everywhere, Local History, skills and the knowledge-graph MCP server, installing
 the knowledge graph for agents (into a scratch home folder), the GitHub connection, and a live Claude edit. Screenshots go to
 `$TMPDIR/kiln-e2e-shots`.

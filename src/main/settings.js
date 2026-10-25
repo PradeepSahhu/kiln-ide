@@ -54,6 +54,7 @@ const DEFAULTS = {
     showThinking: true,
   },
   agents: { kgInClaudeChat: true, kgPromptDismissed: false },
+  ai: { inlineCompletion: true, model: 'claude-opus-5-5', completionModel: 'claude-opus-5-5' },
   github: { auth: 'auto', tokenVar: '' },
   knowledgeGraph: { fetchMinutes: 10 },
   keymapPreset: 'rider',

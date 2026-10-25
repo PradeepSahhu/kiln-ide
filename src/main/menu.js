@@ -140,6 +140,10 @@ function buildMenuTemplate({ recent = [], send, keymap = {} }) {
         c('Reformat Code', 'code.format'),
         c('Show Context Actions', 'code.quickFix'),
         c('Comment with Line Comment', 'edit.toggleComment'),
+        { type: 'separator' },
+        c('Generate Documentation with Claude', 'ai.generateDocs'),
+        c('Generate Tests with Claude', 'ai.generateTests'),
+        c('AI Code Completion at Caret', 'ai.completeHere'),
       ],
     },
     {
@@ -217,7 +221,7 @@ function buildMenuTemplate({ recent = [], send, keymap = {} }) {
     },
     {
       label: 'Claude',
-      submenu: [c('Open Claude', 'view.claude'), c('New Chat', 'claude.newChat'), c('Explain Selection', 'claude.explain'), c('Fix Build Problems with Claude', 'claude.fixBuild'), { type: 'separator' }, c('Ask the Artifacts Knowledge Base…', 'view.artifacts')],
+      submenu: [c('Open Claude', 'view.claude'), c('New Chat', 'claude.newChat'), c('Explain Selection', 'claude.explain'), c('Fix Build Problems with Claude', 'claude.fixBuild'), c('Explain Exception', 'ai.explainException'), c('Generate Documentation', 'ai.generateDocs'), c('Generate Tests', 'ai.generateTests'), c('Generate Commit Message', 'git.generateCommitMessage'), c('Turn AI Code Completion On / Off', 'ai.toggleCompletion'), { type: 'separator' }, c('Ask the Artifacts Knowledge Base…', 'view.artifacts')],
     },
     {
       label: 'Window',

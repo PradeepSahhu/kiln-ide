@@ -111,7 +111,7 @@
 .change-row.k-conflict .name { color: var(--git-conflict); }
 .commit-box { flex: none; border-top: 1px solid var(--border-inner); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .commit-box textarea { min-height: 72px; font-family: inherit; }
-.commit-box .actions { display: flex; align-items: center; gap: 8px; }
+.commit-box .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .stash-row { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 8px; cursor: pointer; }
 .stash-row:hover { background: var(--bg-hover); }
 .stash-row.selected { background: var(--bg-selection); }
@@ -503,3 +503,13 @@
 .change-line .txt { overflow: hidden; text-overflow: ellipsis; }
 .change-row .lines-toggle { opacity: .6; }
 .change-row .lines-toggle:hover { opacity: 1; }
+
+/* AI: commit message button, preview and review dialogs */
+.commit-msg-wrap { position: relative; }
+.commit-msg-wrap textarea { width: 100%; padding-right: 30px; }
+.commit-msg-wrap .commit-ai { position: absolute; top: 4px; right: 4px; }
+.ai-hunks { padding: 0; max-height: 52vh; overflow: auto; }
+.review-list { max-height: 50vh; overflow: auto; }
+.review-row { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+.review-row:hover { background: var(--bg-hover); }
+.review-row .icon { margin-top: 2px; flex: none; }

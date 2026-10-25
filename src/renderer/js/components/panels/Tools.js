@@ -8,6 +8,7 @@ import { toast, errorToast, confirm, showContextMenu } from '../../lib/ui.js';
 import { ToolWindow, Spinner, VirtualList } from '../ui.js';
 import * as ed from '../../services/editor.js';
 import * as tests from '../../services/tests.js';
+import { explainException } from '../../services/ai.js';
 
 // ------------------------------------------------------------ Structure
 
@@ -194,7 +195,9 @@ export function TestsPanel({ onHide }) {
       </div>
       ${tab === 'coverage'
         ? html`<div class="col grow" style="min-width:0"><${CoverageView} coverage=${coverage} root=${root} /></div>`
-        : html`<div class="text-output" ref=${outRef} data-testid="tests-output">${selected && selected.r ? `${selected.r.outcome.toUpperCase()}  ${selected.r.id}\n\n${selected.r.message || ''}\n${selected.r.stack || ''}\n${selected.r.output || ''}` : output.replace(/\x1b\[[0-9;]*m/g, '') || 'Test output appears here.'}</div>`}
+        : selected && selected.r && selected.r.outcome === 'failed'
+          ? html`<div class="col grow" style="min-width:0"><div class="tw-toolbar"><span class="sev-error" style="font-size:12px">${selected.x.name} failed</span><div class="spacer"></div><button class="btn small" data-testid="test-explain" onClick=${() => explainException(`${selected.r.message || ''}\n${selected.r.stack || ''}`)}><${Icon} name="claude" size=${12} />Explain with Claude</button></div><div class="text-output" data-testid="tests-output">${`${selected.r.outcome.toUpperCase()}  ${selected.r.id}\n\n${selected.r.message || ''}\n${selected.r.stack || ''}\n${selected.r.output || ''}`}</div></div>`
+          : html`<div class="text-output" ref=${outRef} data-testid="tests-output">${selected && selected.r ? `${selected.r.outcome.toUpperCase()}  ${selected.r.id}\n\n${selected.r.message || ''}\n${selected.r.stack || ''}\n${selected.r.output || ''}` : output.replace(/\x1b\[[0-9;]*m/g, '') || 'Test output appears here.'}</div>`}
     </div>
   <//>`;
 }

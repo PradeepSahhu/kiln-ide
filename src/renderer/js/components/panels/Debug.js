@@ -9,6 +9,7 @@ import { SHORTCUTS } from '../../lib/commands.js';
 import { ToolWindow, Splitter, Spinner } from '../ui.js';
 import * as dbg from '../../services/debug.js';
 import * as ed from '../../services/editor.js';
+import { explainException } from '../../services/ai.js';
 
 const expanded = new Set(); // variable paths kept open across steps, like Rider
 
@@ -275,7 +276,7 @@ export function DebugPanel({ onHide }) {
   return html`<${ToolWindow} side="bottom" title="Debug" onHide=${onHide}
       tabs=${html`${s.name ? html`<span class="dbg-session"><${Icon} name="debug" size=${13} />${s.name}</span>` : null}
         ${['debugger', 'console', 'breakpoints'].map((t) => html`<button class=${cls('tw-tab', tab === t && 'active')} data-testid=${`debug-tab-${t}`} onClick=${() => setTab(t)}>${t === 'debugger' ? 'Debugger' : t === 'console' ? 'Console' : 'Breakpoints'}</button>`)}`}
-      actions=${html`<span class=${cls('dbg-status', state)}>${status}${s.exitCode != null && s.state === 'terminated' ? ` (exit code ${s.exitCode})` : ''}</span>`}>
+      actions=${html`${s.state === 'stopped' && s.reason === 'exception' ? html`<button class="btn small" data-testid="debug-explain" onClick=${() => explainException(`${s.text || 'Exception'}\n${s.frames.map((f) => `    at ${f.name} (${f.file || '?'}:${f.line}:${f.col || 1})`).join('\n')}`)}><${Icon} name="claude" size=${12} />Explain with Claude</button>` : null}<span class=${cls('dbg-status', state)}>${status}${s.exitCode != null && s.state === 'terminated' ? ` (exit code ${s.exitCode})` : ''}</span>`}>
     <div class="dbg" data-testid="debug-panel" data-state=${state}>
       <${ActionBar} state=${s.state} />
       ${tab === 'debugger'

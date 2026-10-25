@@ -38,6 +38,15 @@ const shots = path.join(os.tmpdir(), 'kiln-e2e-shots');
 const toolsDir = path.join(os.tmpdir(), 'kiln-test-tools');
 fs.mkdirSync(toolsDir, { recursive: true });
 fs.mkdirSync(shots, { recursive: true });
+// Test answers for the AI features (inline completion, docs, tests, review); a kind missing here goes
+// to Claude for real (the commit message, in the test that is skipped with KILN_E2E_SKIP_CLAUDE).
+const aiStub = path.join(tmp('kiln-e2e-ai-'), 'stub.json');
+fs.writeFileSync(aiStub, JSON.stringify({
+  inlineCompletion: 'return x * x',
+  generateDocs: { code: 'def square(x):\n    """Return x squared."""\n    return x * x' },
+  generateTests: { path: 'tests/test_ai_demo.py', content: 'from ai_demo import square\n\n\ndef test_square():\n    assert square(3) == 9\n' },
+  review: { summary: 'One possible problem.', findings: [{ file: 'ai_demo.py', line: 3, severity: 'warning', message: 'square() does not check its argument type.', suggestion: 'Accept only numbers.' }] },
+}));
 
 async function shot(name) {
   try {
@@ -126,10 +135,25 @@ async function gutterTest(line, label) {
   await win.click(sel('menu-item', `[data-label^="${label}"]`));
 }
 
+/** In the Commit window, tick only `file` (re-applied until the change list stops changing). */
+async function commitOnly(file) {
+  const rows = () => win.$$eval(sel('change-row'), (els) => els.map((e) => ({ path: e.dataset.path, on: !!(e.querySelector('input[type="checkbox"]') || {}).checked })));
+  await waitFor(async () => {
+    const list = await rows();
+    if (!list.some((r) => r.path === file)) return false;
+    const wrong = list.filter((r) => r.on !== (r.path === file));
+    for (const r of wrong) await win.locator(sel('change-row', `[data-path="${r.path}"] input[type="checkbox"]`)).setChecked(r.path === file, { timeout: 2000 }).catch(() => {});
+    if (wrong.length) return false;
+    await new Promise((r) => setTimeout(r, 500));
+    const again = await rows();
+    return again.length === list.length && again.every((r) => r.on === (r.path === file)) ? true : false;
+  }, { timeout: 30000, interval: 300, message: `only ${file} ticked` });
+}
+
 const outcome = (name) => win.getAttribute(sel('test-row', `[data-name="${name}"]`), 'data-outcome').catch(() => null);
 
 before(async () => {
-  app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, KILN_USER_DATA: userData, KILN_E2E: '1', KILN_AGENT_HOME: agentHome, KILN_TOOLS_DIR: toolsDir }, timeout: 90000 });
+  app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, KILN_USER_DATA: userData, KILN_E2E: '1', KILN_AGENT_HOME: agentHome, KILN_TOOLS_DIR: toolsDir, KILN_AI_STUB: aiStub }, timeout: 90000 });
   win = await app.firstWindow();
   win.on('pageerror', (err) => console.error('[renderer error]', err.message));
   await win.waitForSelector(sel('welcome'), { timeout: 60000 });
@@ -564,6 +588,80 @@ test('git: commit individual lines; log actions - tag, cherry-pick, revert, inte
   await waitFor(() => git(dir, 'rev-parse', 'HEAD').trim() === before, { message: 'reset' });
   assert.ok(fs.existsSync(path.join(dir, 'r1.txt')), 'mixed reset keeps the files');
   assert.match(git(dir, 'status', '--porcelain'), /\?\? r1\.txt/);
+});
+
+test('AI features: inline completion, Generate Documentation and Tests with a preview, review before commit', { timeout: 240000 }, async () => {
+  const dir = path.join(workspace, 'e2e_py');
+  const file = path.join(dir, 'ai_demo.py');
+  fs.writeFileSync(file, 'def square(x):\n    \n');
+  await kiln('openFile', file, 2, 5);
+  // Inline completion: ghost text at the caret, Tab accepts it.
+  await run('ai.completeHere');
+  await waitFor(async () => !!(await win.$('.ghost-text-decoration, .ghost-text')), { timeout: 30000, message: 'ghost text' });
+  await shot('25-inline-completion');
+  await win.keyboard.press('Tab');
+  await waitFor(async () => /def square\(x\):\n {4}return x \* x/.test(await kiln('getActiveContent')), { message: 'completion accepted' });
+  await run('file.save');
+
+  // Generate Documentation: a preview, then the docstring is in the file.
+  await kiln('openFile', file, 2, 5);
+  await waitFor(async () => (await kiln('indexHas', 'square')) === true, { message: 'ai_demo.py indexed' });
+  await run('ai.generateDocs');
+  await win.waitForSelector(sel('ai-preview'));
+  await waitFor(async () => (await win.getAttribute(sel('ai-preview-state'), 'data-state')) === 'ready', { message: 'docs preview' });
+  assert.match(await win.textContent(sel('ai-preview-hunks')), /Return x squared/);
+  assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /Return x squared/, 'nothing is written before Apply');
+  await shot('26-generate-docs');
+  await win.click(sel('ai-apply'));
+  await waitFor(() => /"{3}Return x squared\."{3}/.test(fs.readFileSync(file, 'utf8')), { message: 'docstring saved' });
+
+  // Generate Tests: a new test file, opened in the editor.
+  await kiln('openFile', file, 3, 5);
+  await run('ai.generateTests');
+  await waitFor(async () => (await win.getAttribute(sel('ai-preview-state'), 'data-state').catch(() => null)) === 'ready', { message: 'tests preview' });
+  await win.click(sel('ai-apply'));
+  const testFile = path.join(dir, 'tests', 'test_ai_demo.py');
+  await waitFor(() => fs.existsSync(testFile) && /def test_square/.test(fs.readFileSync(testFile, 'utf8')), { message: 'test file written' });
+  await win.waitForSelector(sel('editor-tab', '[data-name="test_ai_demo.py"]'));
+
+  // Review the changes before committing them, then commit anyway.
+  await run('view.commit');
+  await win.click(sel('commit-tab'));
+  await waitFor(async () => !!(await win.$(sel('change-row', '[data-path="ai_demo.py"]'))), { message: 'ai_demo.py listed' });
+  await commitOnly('ai_demo.py');
+  await win.fill(sel('commit-message'), 'Add square');
+  await win.click(sel('commit-review'));
+  await waitFor(async () => (await win.getAttribute(sel('ai-review-state'), 'data-state').catch(() => null)) === 'ready', { message: 'review' });
+  assert.match(await win.textContent(sel('ai-finding')), /ai_demo\.py:3.*does not check/);
+  await shot('27-review-changes');
+  await win.click(sel('ai-review-commit'));
+  await waitFor(() => git(dir, 'log', '-1', '--format=%s').trim() === 'Add square', { message: 'committed after the review' });
+});
+
+test('AI features with Claude: a commit message written from the diff; Explain Exception sends the trace and the code', { skip: process.env.KILN_E2E_SKIP_CLAUDE === '1', timeout: 240000 }, async () => {
+  const dir = path.join(workspace, 'e2e_py');
+  fs.appendFileSync(path.join(dir, 'ai_demo.py'), '\n\ndef cube(x):\n    return x * x * x\n');
+  await run('view.commit');
+  await win.click(sel('commit-tab'));
+  await waitFor(async () => !!(await win.$(sel('change-row', '[data-path="ai_demo.py"]'))), { message: 'change listed' });
+  await commitOnly('ai_demo.py');
+  await win.fill(sel('commit-message'), '');
+  await win.click(sel('commit-generate'));
+  await waitFor(async () => (await win.inputValue(sel('commit-message'))).trim().length > 5, { timeout: 180000, message: 'commit message from Claude' });
+  const msg = await win.inputValue(sel('commit-message'));
+  assert.ok(msg.split('\n')[0].length <= 72, `subject line is short: ${msg.split('\n')[0]}`);
+  assert.match(msg, /cube/i, `the message is about the change: ${msg}`);
+  await shot('28-commit-message');
+
+  const trace = `Traceback (most recent call last):\n  File "${path.join(dir, 'ai_demo.py')}", line 4, in square\n    return x * x\nTypeError: can't multiply sequence by non-int of type 'str'`;
+  await kiln('claudeConfigure', { model: 'haiku', permissionMode: 'default' });
+  await run('ai.explainException', trace);
+  await waitFor(async () => {
+    const items = await win.evaluate(() => { const c = window.__kiln.store.get().claude; return (c.chats[c.active] || { items: [] }).items.filter((i) => i.kind === 'user').map((i) => i.text); });
+    const last = items[items.length - 1] || '';
+    return /Explain this exception/.test(last) && /ai_demo\.py:4/.test(last) && /return x \* x/.test(last);
+  }, { message: 'explain prompt with the trace and the code' });
+  await win.evaluate(() => window.__kiln.run('claude.newChat'));
 });
 
 test('creates a C# console project, builds it, runs it', { skip: !has('dotnet'), timeout: 500000 }, async () => {

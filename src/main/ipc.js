@@ -457,6 +457,15 @@ function register({ getContext, createWindow, rebuildMenu, broadcast }) {
   handle('refactor:compute', (ctx, req) => ctx.refactor.compute(req));
   handle('lsp:installCsharp', (ctx) => ctx.lsp.installCsharpLs((text) => ctx.send('templates:progress', { text })));
 
+  // ------------------------------------------------------------- AI
+  handle('ai:status', (ctx) => ctx.ai.status());
+  handle('ai:inlineCompletion', (ctx, req) => ctx.ai.inlineCompletion(req || {}));
+  handle('ai:commitMessage', (ctx, req) => ctx.ai.commitMessage(req || {}));
+  handle('ai:review', (ctx, req) => ctx.ai.reviewChanges(req || {}));
+  handle('ai:generateDocs', (ctx, req) => ctx.ai.generateDocs(req || {}));
+  handle('ai:generateTests', (ctx, req) => ctx.ai.generateTests(req || {}));
+  handle('ai:stackContext', (ctx, text) => require('./services/stack-context').stackContext(text, { root: ctx.root }));
+
   // ------------------------------------------------ message flow/kafka
   handle('flow:analyze', (ctx) => analyzeFlow(ctx));
   handle('kafka:connect', (ctx, opts) => ctx.kafka.connect(opts));

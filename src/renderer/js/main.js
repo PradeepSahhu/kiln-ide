@@ -24,6 +24,8 @@ import * as tests from './services/tests.js';
 import './components/RefactorDialog.js';
 import './components/ConflictsDialog.js';
 import './components/GitDialogs.js';
+import './components/AiDialogs.js';
+import * as ai from './services/ai.js';
 import { showConflicts } from './services/conflicts.js';
 import { initProject, openProject, closeProject, newFileIn } from './services/project.js';
 
@@ -225,6 +227,12 @@ function registerCommands() {
     { id: 'claude.newChat', title: 'New Claude Chat', run: needProject(async () => { openTool('right', 'claude'); await claude.startNewChat(); }) },
     { id: 'claude.explain', title: 'Explain Selection with Claude', run: needProject(() => claude.explainSelection()) },
     { id: 'claude.fixBuild', title: 'Fix Build Problems with Claude', run: needProject(() => claude.fixBuildProblems()) },
+    { id: 'ai.generateDocs', title: 'Generate Documentation with Claude', run: needProject(() => ai.generateDocs()) },
+    { id: 'ai.generateTests', title: 'Generate Tests with Claude', run: needProject(() => ai.generateTests()) },
+    { id: 'ai.explainException', title: 'Explain Exception with Claude', run: needProject((trace) => ai.explainException(trace)) },
+    { id: 'ai.completeHere', title: 'AI Code Completion at Caret', run: needProject(() => ai.triggerInlineCompletion()), when: editorFocused },
+    { id: 'ai.toggleCompletion', title: 'Turn AI Code Completion On / Off', run: () => ai.toggleInlineCompletion() },
+    { id: 'git.generateCommitMessage', title: 'Generate Commit Message with Claude', run: needProject(() => { openTool('left', 'commit'); store.set({ commitTab: { tab: 'commit', generate: Date.now(), t: Date.now() } }); }) },
 
     { id: 'debug.start', title: 'Debug', run: needProject((cfg) => (paused() ? debug.resume() : debug.startDebug(cfg && typeof cfg === 'object' ? cfg : undefined))) },
     { id: 'debug.file', title: 'Debug Current File', run: needProject((p) => { const file = typeof p === 'string' ? p : ed.activeFile(); if (file) debug.debugFile(file); else toast({ title: 'Open a Python or JavaScript file to debug it', timeout: 2500 }); }) },

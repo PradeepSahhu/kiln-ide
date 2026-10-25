@@ -20,6 +20,7 @@ const RIDER = {
   'code.format': ['CmdOrCtrl+Alt+L'],
   'code.quickFix': ['Alt+Enter'],
   'refactor.rename': ['Shift+F6'],
+  'ai.completeHere': ['Alt+\\'],
   'refactor.this': [mac ? 'Ctrl+T' : 'Ctrl+Shift+Alt+T'],
   'refactor.changeSignature': ['CmdOrCtrl+F6'],
   'refactor.extractMethod': ['CmdOrCtrl+Alt+M'],

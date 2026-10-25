@@ -10,6 +10,7 @@ import { ToolWindow, VirtualList, Spinner, Splitter } from '../ui.js';
 import * as git from '../../services/git.js';
 import * as ed from '../../services/editor.js';
 import { openMerge, showConflicts, checkConflicts } from '../../services/conflicts.js';
+import * as ai from '../../services/ai.js';
 
 const KIND_LETTER = { modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: 'U', conflict: 'C', copied: 'C' };
 
@@ -68,6 +69,8 @@ function CommitTab() {
   const [message, setMessage] = useState('');
   const [amend, setAmend] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [writing, setWriting] = useState(false);
+  const generateReq = useStore((s) => s.commitTab && s.commitTab.generate);
   // Line selections: path -> { data (hunks), ids (selected line ids), all (every changed line id) }.
   const [lines, setLines] = useState({});
   const [expanded, setExpanded] = useState(() => new Set());
@@ -116,6 +119,15 @@ function CommitTab() {
   useEffect(() => {
     if (amend && !message) invoke('git:lastCommitMessage').then(setMessage);
   }, [amend]);
+  const writeMessage = async () => {
+    setWriting(true);
+    const msg = await ai.generateCommitMessage(files.filter((f) => checked.has(f.path)));
+    setWriting(false);
+    if (msg) setMessage(msg);
+  };
+  useEffect(() => {
+    if (generateReq) writeMessage();
+  }, [generateReq]);
   const tracked = files.filter((f) => f.kind !== 'untracked');
   const untracked = files.filter((f) => f.kind === 'untracked');
   const selectedFiles = files.filter((f) => checked.has(f.path));
@@ -191,12 +203,16 @@ function CommitTab() {
       ${!files.length ? html`<div class="empty">No local changes.</div>` : null}
     </div>
     <div class="commit-box">
-      <textarea class="input" data-testid="commit-message" placeholder="Commit message" value=${message} onInput=${(e) => setMessage(e.target.value)} onKeyDown=${(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doCommit(false); }}></textarea>
+      <div class="commit-msg-wrap">
+        <textarea class="input" data-testid="commit-message" placeholder="Commit message" value=${message} onInput=${(e) => setMessage(e.target.value)} onKeyDown=${(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doCommit(false); }}></textarea>
+        <button class="icon-btn sm commit-ai" data-testid="commit-generate" title="Write the commit message with Claude, from the diff of the selected files" disabled=${writing || !selectedFiles.length} onClick=${writeMessage}>${writing ? html`<${Spinner} />` : html`<${Icon} name="sparkle" />`}</button>
+      </div>
       <div class="actions">
         <label class="checkbox"><input type="checkbox" checked=${amend} onChange=${(e) => setAmend(e.target.checked)} />Amend</label>
         <div class="spacer"></div>
         <button class="btn primary" data-testid="commit-button" disabled=${busy} onClick=${() => doCommit(false)}>${busy ? html`<${Spinner} />` : null}Commit</button>
         <button class="btn" disabled=${busy} onClick=${() => doCommit(true)}>Commit and Push…</button>
+        <button class="btn" data-testid="commit-review" title="Claude reviews the selected changes before you commit" disabled=${busy || !selectedFiles.length} onClick=${async () => { if (await ai.reviewChanges(selectedFiles)) doCommit(false); }}><${Icon} name="claude" size=${13} />Review</button>
       </div>
     </div>
   </div>`;

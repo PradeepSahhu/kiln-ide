@@ -72,6 +72,7 @@ export function editorOptions() {
     padding: { top: 6 },
     'bracketPairColorization.independentColorPoolPerBracketType': true,
     suggest: { preview: true, showStatusBar: true },
+    inlineSuggest: { enabled: (settings().ai || {}).inlineCompletion !== false, mode: 'prefix' },
     quickSuggestions: { other: true, comments: false, strings: false },
     occurrencesHighlight: 'singleFile',
     links: true,

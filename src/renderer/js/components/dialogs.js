@@ -219,6 +219,19 @@ export function CloneDialog() {
 
 // --------------------------------------------------------------- Settings
 
+const AI_MODELS = [['claude-opus-5-5', 'Claude Opus 5.5'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['claude-haiku-5-5', 'Claude Haiku 5.5'], ['claude-fable-5-1', 'Claude Fable 5.1']];
+
+/** How the AI features reach Claude: the Anthropic API (API key) or Claude Code (your Claude login). */
+function AiTransport() {
+  const [st, setSt] = useState(null);
+  useEffect(() => {
+    invoke('ai:status').then(setSt).catch(() => setSt(null));
+  }, []);
+  if (!st) return null;
+  const how = st.transport === 'api' ? 'the Anthropic API (ANTHROPIC_API_KEY is set)' : st.transport === 'stub' ? 'test answers (KILN_AI_STUB)' : 'Claude Code with your Claude login. Set ANTHROPIC_API_KEY for faster completions.';
+  return html`<div class="muted" data-testid="ai-transport" data-transport=${st.transport} style="font-size:12px;margin-top:6px">AI features call Claude through ${how}</div>`;
+}
+
 const SECTIONS = [
   ['appearance', 'Appearance', 'palette'],
   ['themes', 'Theme Editor', 'wand'],
@@ -322,7 +335,12 @@ export function SettingsDialog({ section: initial }) {
       ${row('Default effort', null, select('claude', 'effort', [['default', 'Default'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']]))}
       ${row('Send the open file as context', null, check('claude', 'includeContext'))}
       ${row('Show thinking summaries', null, check('claude', 'showThinking'))}
-      ${row('Claude Code executable', 'Empty: bundled with Kiln. "system": the claude on PATH', text('claude', 'executable', 'system'))}`,
+      ${row('Claude Code executable', 'Empty: bundled with Kiln. "system": the claude on PATH', text('claude', 'executable', 'system'))}
+      <h3 style="margin-top:18px">AI in the editor</h3>
+      ${row('AI code completion', 'Ghost text as you type; Tab accepts, Alt+\\ asks at the caret', check('ai', 'inlineCompletion'))}
+      ${row('Model for code completion', 'Claude Haiku 5.5 answers fastest', select('ai', 'completionModel', AI_MODELS))}
+      ${row('Model for commit messages, reviews, docs and tests', null, select('ai', 'model', AI_MODELS))}
+      <${AiTransport} />`,
     startup: html`<h3>Startup</h3>${row('Reopen the last project on startup', 'Otherwise the Welcome screen lists your recent solutions', check('startup', 'reopenLastProject'))}`,
   };
   return html`<${Modal} title="Settings" wide=${section === 'themes' || section === 'keymap' ? 'x' : true} className="settings-modal" testid="settings-dialog">

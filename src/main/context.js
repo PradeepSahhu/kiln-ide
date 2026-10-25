@@ -21,6 +21,7 @@ const { ArtifactsKB } = require('./services/artifacts');
 const { KafkaLive } = require('./services/kafka-live');
 const { DebugService } = require('./services/debug');
 const { RefactorService } = require('./services/refactor');
+const { AiService } = require('./services/ai');
 const fsSvc = require('./services/fs');
 
 // Changes to these files can add projects, dependencies or run configurations.
@@ -49,6 +50,7 @@ class ProjectContext {
     this.kafka = new KafkaLive();
     this.debug = new DebugService(this);
     this.refactor = new RefactorService(this);
+    this.ai = new AiService(this);
   }
 
   send(channel, payload) {
