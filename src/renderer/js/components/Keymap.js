@@ -1,6 +1,6 @@
 // Settings › Keymap: every IDE action with its shortcuts. Pick a preset, search by name or by pressing
 // a shortcut, record new shortcuts (with conflict warnings), remove or reset them.
-import { html, useEffect, useMemo, useRef, useState } from '../lib/preact.js';
+import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../lib/preact.js';
 import { useStore, store } from '../lib/store.js';
 import { Icon } from '../lib/icons.js';
 import { invoke } from '../lib/ipc.js';
@@ -28,6 +28,7 @@ async function apply(promise) {
 function useKeyCapture(active, handler) {
   const ref = useRef(handler);
   ref.current = handler;
+  const [listening, setListening] = useState(false);
   useEffect(() => {
     if (!active) return undefined;
     setRecording(true);
@@ -38,11 +39,14 @@ function useKeyCapture(active, handler) {
       ref.current(e);
     };
     window.addEventListener('keydown', k, true);
+    setListening(true);
     return () => {
       window.removeEventListener('keydown', k, true);
       setRecording(false);
+      setListening(false);
     };
   }, [active]);
+  return listening;
 }
 
 /** Captures the next key combination; Enter saves, Escape cancels, Backspace clears. */
@@ -57,7 +61,7 @@ function Recorder({ title, onSave, onCancel, conflictsFor }) {
   useEffect(() => {
     setTimeout(() => ref.current && ref.current.focus(), 0);
   }, []);
-  useKeyCapture(true, (e) => {
+  const listening = useKeyCapture(true, (e) => {
     const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
     if (plain && e.key === 'Escape') return onCancel();
     if (plain && e.key === 'Enter' && accRef.current) return onSave(accRef.current, takeRef.current);
@@ -66,7 +70,7 @@ function Recorder({ title, onSave, onCancel, conflictsFor }) {
     if (a) setAcc(a);
   });
   const conflicts = acc ? conflictsFor(acc) : [];
-  return html`<div class="km-recorder" data-testid="keymap-recorder">
+  return html`<div class="km-recorder" data-testid="keymap-recorder" data-listening=${listening ? 'true' : 'false'}>
     <div class="muted" style="font-size:12px">Press the keys for <b style="color:var(--text)">${title}</b></div>
     <div class="km-capture" ref=${ref} tabIndex="0">${acc ? formatAccelerator(acc) : 'Waiting for a key combination…'}</div>
     ${conflicts.length

@@ -11,6 +11,7 @@ import * as ed from '../services/editor.js';
 import { registerLanguageFeatures } from '../services/lang.js';
 import { KnowledgeGraphView } from './views/Graph.js';
 import { MessageFlowView } from './views/Flow.js';
+import { MergeView } from './views/Merge.js';
 
 function TabBar() {
   const tabs = useStore((s) => s.editor.tabs);
@@ -37,7 +38,7 @@ function TabBar() {
     ]);
   return html`<div class="tabs" ref=${ref} data-testid="editor-tabs">
     ${tabs.map((t) => {
-      const icon = t.kind === 'diff' ? html`<${Icon} name="diff" size=${14} />` : t.kind === 'graph' ? html`<${Icon} name="graph" size=${14} />` : t.kind === 'flow' ? html`<${Icon} name="flow" size=${14} />` : t.kind === 'markdown' ? html`<${Icon} name="eye" size=${14} />` : html`<${FileIcon} name=${t.title} />`;
+      const icon = t.kind === 'diff' ? html`<${Icon} name="diff" size=${14} />` : t.kind === 'graph' ? html`<${Icon} name="graph" size=${14} />` : t.kind === 'flow' ? html`<${Icon} name="flow" size=${14} />` : t.kind === 'markdown' ? html`<${Icon} name="eye" size=${14} />` : t.kind === 'merge' ? html`<${Icon} name="branch" size=${14} />` : html`<${FileIcon} name=${t.title} />`;
       return html`<div key=${t.id} class=${cls('tab', t.id === active && 'active', t.dirty && 'dirty', t.preview && 'preview', errFiles.has(t.path) && 'err')}
           data-testid="editor-tab" data-name=${t.title} data-path=${t.path || ''} data-active=${String(t.id === active)}
           onClick=${() => ed.activate(t.id)} onDblClick=${() => ed.pinTab(t.id)} onMouseDown=${(e) => e.button === 1 && ed.closeTab(t.id)} onContextMenu=${(e) => menu(e, t)} title=${t.path || t.title}>
@@ -139,6 +140,7 @@ export function EditorArea() {
       ${kind === 'markdown' ? html`<${MarkdownView} path=${tab.data.path} />` : null}
       ${kind === 'graph' ? html`<${KnowledgeGraphView} key=${tab.id} tab=${tab} />` : null}
       ${kind === 'flow' ? html`<${MessageFlowView} key=${tab.id} />` : null}
+      ${kind === 'merge' ? html`<${MergeView} key=${tab.id} tab=${tab} />` : null}
       ${!tab ? html`<${EmptyEditor} />` : null}
     </div>
     ${kind === 'file' ? html`<${Breadcrumbs} />` : null}

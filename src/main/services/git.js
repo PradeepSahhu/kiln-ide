@@ -329,6 +329,106 @@ class GitService {
     return r.code === 0 ? { ok: true, output: r.stdout.trim() } : { ok: false, error: (r.stdout + '\n' + r.stderr).trim() };
   }
 
+  // ------------------------------------------------------------ conflicts
+
+  /** Files with unresolved conflicts (merge, rebase, cherry-pick, revert or stash pop). */
+  async conflicts() {
+    this.require();
+    const st = await this.status();
+    return st.files.filter((f) => f.kind === 'conflict').map((f) => ({ path: f.path, how: f.x + f.y }));
+  }
+
+  operation() {
+    const st = this.repoState();
+    return st.merging ? 'merge' : st.rebasing ? 'rebase' : st.cherryPicking ? 'cherry-pick' : st.reverting ? 'revert' : 'stash';
+  }
+
+  /** Names for the two sides: the current branch and what is being merged / applied. */
+  async sideLabels() {
+    const op = this.operation();
+    const name = async (ref) => {
+      const r = await this.raw(['name-rev', '--name-only', '--exclude=tags/*', '--no-undefined', ref], { quiet: true });
+      return r.code === 0 ? r.stdout.trim().replace(/^remotes\//, '').replace(/[~^]\d*$/, '') : '';
+    };
+    const head = (await this.raw(['symbolic-ref', '--short', '-q', 'HEAD'], { quiet: true })).stdout.trim();
+    if (op === 'merge') return { ours: head || 'HEAD', theirs: (await name('MERGE_HEAD')) || 'MERGE_HEAD' };
+    if (op === 'rebase') {
+      let branch = '';
+      for (const d of ['rebase-merge', 'rebase-apply']) {
+        try {
+          branch = fs.readFileSync(path.join(this.gitDir, d, 'head-name'), 'utf8').trim().replace(/^refs\/heads\//, '');
+          break;
+        } catch {
+          /* not this kind of rebase */
+        }
+      }
+      return { ours: 'upstream', theirs: branch || 'your commit' };
+    }
+    if (op === 'cherry-pick') return { ours: head || 'HEAD', theirs: (await name('CHERRY_PICK_HEAD')) || 'cherry-picked commit' };
+    if (op === 'revert') return { ours: head || 'HEAD', theirs: 'revert' };
+    return { ours: 'Updated upstream', theirs: 'Stashed changes' };
+  }
+
+  /**
+   * The three versions of a conflicted file - yours (stage 2), the common base (stage 1), theirs
+   * (stage 3) - and git's diff3 merge of them, so conflicts show the base too. Nothing is written.
+   */
+  async mergeVersions(rel) {
+    this.require();
+    const [ours, base, theirs] = await Promise.all([this.show(':2', rel), this.show(':1', rel), this.show(':3', rel)]);
+    if (ours.binary || theirs.binary) return { binary: true, path: rel };
+    const labels = await this.sideLabels();
+    const dir = await fs.promises.mkdtemp(path.join(require('os').tmpdir(), 'kiln-merge-'));
+    try {
+      const files = ['ours', 'base', 'theirs'].map((n) => path.join(dir, n));
+      await Promise.all([ours, base, theirs].map((v, i) => fs.promises.writeFile(files[i], v.text || '')));
+      const r = await this.raw(['merge-file', '-p', '--diff3', '-L', labels.ours, '-L', 'base', '-L', labels.theirs, ...files], { quiet: true });
+      if (r.code < 0) throw new Error((r.stderr || '').trim() || 'git merge-file failed');
+      const working = await this.working(rel);
+      return { path: rel, ours: ours.text, base: base.missing ? null : base.text, theirs: theirs.text, oursMissing: !!ours.missing, theirsMissing: !!theirs.missing, merged: r.stdout, working: working.missing ? null : working.text, oursLabel: labels.ours, theirsLabel: labels.theirs, operation: this.operation() };
+    } finally {
+      fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  async requireConflict(rel) {
+    if (!(await this.conflicts()).some((c) => c.path === rel)) throw new Error(`${rel} is not in conflict.`);
+  }
+
+  /** Write the resolved text and mark the file resolved (git add). */
+  async resolveConflict(rel, content) {
+    this.require();
+    await this.requireConflict(rel);
+    await fs.promises.writeFile(path.join(this.root, rel), content);
+    await this.ok(['add', '--', rel]);
+    return { ok: true };
+  }
+
+  /** Resolve a file by taking one side entirely ('ours' | 'theirs'); a side that deleted it removes it. */
+  async acceptSide(rel, side) {
+    this.require();
+    await this.requireConflict(rel);
+    const stage = side === 'ours' ? ':2' : ':3';
+    const v = await this.show(stage, rel);
+    if (v.missing) await this.ok(['rm', '-q', '--', rel]);
+    else {
+      await this.ok(['checkout', side === 'ours' ? '--ours' : '--theirs', '--', rel]);
+      await this.ok(['add', '--', rel]);
+    }
+    return { ok: true };
+  }
+
+  /** After resolving everything: commit the merge, or continue the rebase / cherry-pick / revert. */
+  async continueOperation() {
+    this.require();
+    if ((await this.conflicts()).length) return { ok: false, error: 'Resolve every conflict first.' };
+    const op = this.operation();
+    const args = op === 'merge' ? ['commit', '--no-edit'] : op === 'rebase' ? ['-c', 'core.editor=true', 'rebase', '--continue'] : op === 'cherry-pick' ? ['-c', 'core.editor=true', 'cherry-pick', '--continue'] : op === 'revert' ? ['-c', 'core.editor=true', 'revert', '--continue'] : null;
+    if (!args) return { ok: true };
+    const r = await this.raw(args);
+    return r.code === 0 ? { ok: true, output: r.stdout.trim() } : { ok: false, error: (r.stdout + '\n' + r.stderr).trim() };
+  }
+
   async abort() {
     this.require();
     const st = this.repoState();

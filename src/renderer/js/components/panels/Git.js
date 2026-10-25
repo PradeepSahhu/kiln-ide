@@ -9,6 +9,7 @@ import { confirm, toast, errorToast, showContextMenu } from '../../lib/ui.js';
 import { ToolWindow, VirtualList, Spinner, Splitter } from '../ui.js';
 import * as git from '../../services/git.js';
 import * as ed from '../../services/editor.js';
+import { openMerge, showConflicts, checkConflicts } from '../../services/conflicts.js';
 
 const KIND_LETTER = { modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: 'U', conflict: 'C', copied: 'C' };
 
@@ -77,6 +78,7 @@ function CommitTab() {
   };
   const fileMenu = (e, f) =>
     showContextMenu(e, [
+      f.kind === 'conflict' ? { label: 'Resolve Conflicts…', icon: 'branch', run: () => openMerge(f.path) } : null,
       { label: 'Show Diff', icon: 'diff', run: () => showFileDiff({ kind: 'working', path: f.path, origPath: f.origPath }) },
       { label: 'Open File', icon: 'file', disabled: f.kind === 'deleted', run: () => ed.openFile(`${store.get().project.git.root}/${f.path}`) },
       { separator: true },
@@ -98,10 +100,10 @@ function CommitTab() {
       ? html`<div class="list-group" onClick=${() => toggleAll(list, !list.every((f) => checked.has(f.path)))}>
             <input type="checkbox" checked=${list.every((f) => checked.has(f.path))} onClick=${(e) => e.stopPropagation()} onChange=${(e) => toggleAll(list, e.target.checked)} />${title}<span class="badge">${list.length}</span>
           </div>
-          ${list.map((f) => html`<${ChangeRow} f=${f} checked=${checked.has(f.path)} selected=${sel === f.path} onSelect=${() => setSel(f.path)} onCheck=${(on) => { const n = new Set(checked); on ? n.add(f.path) : n.delete(f.path); setChecked(n); }} onOpen=${() => showFileDiff({ kind: f.kind === 'untracked' ? 'working' : 'working', path: f.path, origPath: f.origPath })} onMenu=${(e) => fileMenu(e, f)} />`)}`
+          ${list.map((f) => html`<${ChangeRow} f=${f} checked=${checked.has(f.path)} selected=${sel === f.path} onSelect=${() => setSel(f.path)} onCheck=${(on) => { const n = new Set(checked); on ? n.add(f.path) : n.delete(f.path); setChecked(n); }} onOpen=${() => (f.kind === 'conflict' ? openMerge(f.path) : showFileDiff({ kind: 'working', path: f.path, origPath: f.origPath }))} onMenu=${(e) => fileMenu(e, f)} />`)}`
       : null;
   return html`<div class="commit-panel">
-    ${status && (status.merging || status.rebasing || status.cherryPicking) ? html`<div class="repo-banner"><${Icon} name="warning" className="sev-warning" />${status.merging ? 'Merging' : status.rebasing ? 'Rebasing' : 'Cherry-picking'} — resolve conflicts, then commit.<div class="spacer"></div><button class="btn small" onClick=${async () => { await invoke('git:abort'); git.refreshAll(); }}>Abort</button></div>` : null}
+    ${status && (status.merging || status.rebasing || status.cherryPicking) ? html`<div class="repo-banner"><${Icon} name="warning" className="sev-warning" />${status.merging ? 'Merging' : status.rebasing ? 'Rebasing' : 'Cherry-picking'} — resolve conflicts, then commit.<div class="spacer"></div><button class="btn small primary" data-testid="resolve-conflicts" onClick=${() => showConflicts()}>Resolve…</button><button class="btn small" onClick=${async () => { await invoke('git:abort'); git.refreshAll(); }}>Abort</button></div>` : null}
     <div class="tw-toolbar">
       <button class="icon-btn sm" title="Refresh" onClick=${() => git.refreshAll()}><${Icon} name="refresh" /></button>
       <button class="icon-btn sm" title="Rollback selected" disabled=${!selectedFiles.length} onClick=${() => rollback(selectedFiles)}><${Icon} name="arrowLeft" /></button>
@@ -141,6 +143,7 @@ function StashTab() {
     if (r && !r.ok) errorToast('Stash operation failed', new Error(r.error));
     if (open === ref) setOpen(null);
     await git.refreshAll();
+    if (r && !r.ok) await checkConflicts();
   };
   return html`<div class="commit-panel">
     <div class="tw-toolbar">

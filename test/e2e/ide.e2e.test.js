@@ -5,7 +5,7 @@
 //
 //   npm run test:e2e                      full suite
 //   KILN_E2E_SKIP_CLAUDE=1 npm run test:e2e   skip the test that sends one small prompt to Claude
-const { test, before, after } = require('node:test');
+const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
@@ -112,6 +112,13 @@ before(async () => {
   win = await app.firstWindow();
   win.on('pageerror', (err) => console.error('[renderer error]', err.message));
   await win.waitForSelector(sel('welcome'), { timeout: 60000 });
+});
+
+// A dialog left open by an earlier test would block this one: report it.
+beforeEach(async (t) => {
+  if (!win) return;
+  const open = await win.evaluate(() => (window.__kiln ? window.__kiln.store.get().modals.map((m) => m.type) : [])).catch(() => []);
+  if (open.length) console.log(`  [open dialogs before "${t.name}": ${open.join(', ')}]`);
 });
 
 after(async () => {
@@ -301,6 +308,53 @@ test('branch changes and diff viewer', { timeout: 60000 }, async () => {
   git(dir, 'checkout', '-q', 'main');
 });
 
+test('merge conflicts: the Conflicts dialog, accept a side, resolve per conflict in the merge view, commit the merge', { timeout: 120000 }, async () => {
+  const dir = path.join(workspace, 'e2e_py');
+  const commitAll = (msg) => {
+    git(dir, 'add', 'rates.py', 'notes.txt');
+    git(dir, 'commit', '-q', '-m', msg);
+  };
+  fs.writeFileSync(path.join(dir, 'rates.py'), 'BASE = 1\nRATE = 1\n');
+  fs.writeFileSync(path.join(dir, 'notes.txt'), 'note: base\n');
+  commitAll('rates');
+  git(dir, 'checkout', '-q', '-b', 'feature-rates');
+  fs.writeFileSync(path.join(dir, 'rates.py'), 'BASE = 1\nRATE = 2\n');
+  fs.writeFileSync(path.join(dir, 'notes.txt'), 'note: theirs\n');
+  commitAll('feature rates');
+  git(dir, 'checkout', '-q', 'main');
+  fs.writeFileSync(path.join(dir, 'rates.py'), 'BASE = 1\nRATE = 3\n');
+  fs.writeFileSync(path.join(dir, 'notes.txt'), 'note: ours\n');
+  commitAll('main rates');
+  assert.throws(() => git(dir, 'merge', '--no-edit', 'feature-rates'), 'the merge stops on conflicts');
+
+  await run('view.commit');
+  await win.click(sel('commit-tab'));
+  await win.waitForSelector(sel('resolve-conflicts'), { timeout: 30000 });
+  await win.click(sel('resolve-conflicts'));
+  await win.waitForSelector(sel('conflicts-dialog'));
+  await waitFor(async () => (await win.$$(sel('conflict-row'))).length === 2, { message: 'two conflicted files' });
+  await shot('17-conflicts');
+  await win.click(sel('conflict-row', '[data-path="notes.txt"] [data-testid="conflict-theirs"]'));
+  await waitFor(async () => (await win.$$(sel('conflict-row'))).length === 1, { message: 'notes.txt resolved' });
+  assert.equal(fs.readFileSync(path.join(dir, 'notes.txt'), 'utf8'), 'note: theirs\n');
+
+  await win.click(sel('conflict-row', '[data-path="rates.py"] [data-testid="conflict-merge"]'));
+  await win.waitForSelector(sel('merge-conflict'), { timeout: 30000 });
+  assert.match(await win.textContent(sel('merge-conflict')), /RATE = 3[\s\S]*RATE = 1[\s\S]*RATE = 2/, 'yours, base and theirs');
+  assert.equal(await win.isDisabled(sel('merge-apply')), true, 'cannot apply with conflicts left');
+  await shot('18-merge-view');
+  await win.click(sel('merge-accept-both'));
+  await waitFor(async () => (await win.getAttribute(sel('merge-view'), 'data-unresolved')) === '0', { message: 'conflict resolved' });
+  await win.click(sel('merge-apply'));
+  await waitFor(() => fs.readFileSync(path.join(dir, 'rates.py'), 'utf8') === 'BASE = 1\nRATE = 3\nRATE = 2\n', { message: 'result written' });
+  await waitFor(() => !/^U|^AA|^DD/m.test(git(dir, 'status', '--porcelain')), { message: 'no unmerged paths' });
+
+  await run('git.resolveConflicts');
+  await win.waitForSelector(sel('conflicts-finish'), { timeout: 20000 });
+  await win.click(sel('conflicts-finish'));
+  await waitFor(() => /Merge branch 'feature-rates'/.test(git(dir, 'log', '-1', '--format=%s')), { message: 'merge committed' });
+});
+
 test('creates a C# console project, builds it, runs it', { skip: !has('dotnet'), timeout: 500000 }, async () => {
   const { dir } = await createProject('dotnet-console', 'E2eCs');
   await waitBuild('success');
@@ -412,7 +466,7 @@ test('keyboard shortcuts can be customized in the keymap', { timeout: 60000 }, a
   await win.waitForSelector(sel('keymap-section'));
   await win.fill(sel('keymap-search'), 'Find in Files');
   await win.click(sel('keymap-add', '[data-command="edit.findInFiles"]'));
-  await win.waitForSelector(sel('keymap-recorder'));
+  await win.waitForSelector(sel('keymap-recorder', '[data-listening="true"]'));
   await win.keyboard.press('Alt+Shift+KeyY');
   await win.click(sel('keymap-save'));
   await waitFor(async () => (await win.textContent(sel('keymap-row', '[data-command="edit.findInFiles"]'))).includes('⌥⇧Y'), { message: 'new shortcut listed' });

@@ -21,6 +21,8 @@ import * as sessions from './services/sessions.js';
 import * as debug from './services/debug.js';
 import * as refactor from './services/refactor.js';
 import './components/RefactorDialog.js';
+import './components/ConflictsDialog.js';
+import { showConflicts } from './services/conflicts.js';
 import { initProject, openProject, closeProject, newFileIn } from './services/project.js';
 
 const hasProject = () => !!store.get().project;
@@ -194,6 +196,7 @@ function registerCommands() {
     { id: 'git.branches', title: 'Branches…', run: needProject(() => store.set({ toolbarPopup: { name: 'branch', t: Date.now() } })) },
     { id: 'git.newBranch', title: 'New Branch…', run: needProject(() => git.newBranch()) },
     { id: 'git.stash', title: 'Stash Changes…', run: needProject(() => git.stashChanges()) },
+    { id: 'git.resolveConflicts', title: 'Resolve Conflicts…', run: needProject(() => showConflicts()) },
     { id: 'git.publishGithub', title: 'Share Project on GitHub…', run: needProject(() => openModal('publishGithub')) },
     { id: 'git.githubSettings', title: 'GitHub Connection…', run: () => openModal('settings', { section: 'vcs' }) },
     { id: 'git.branchChanges', title: 'Show Branch Changes', run: needProject((base) => { openTool('left', 'commit'); store.set({ commitTab: { tab: 'branch', base: typeof base === 'string' ? base : undefined, t: Date.now() } }); }) },

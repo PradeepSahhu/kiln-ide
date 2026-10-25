@@ -202,6 +202,7 @@ function buildMenuTemplate({ recent = [], send, keymap = {} }) {
         c('Branches…', 'git.branches'),
         c('New Branch…', 'git.newBranch'),
         c('Stash Changes…', 'git.stash'),
+        c('Resolve Conflicts…', 'git.resolveConflicts'),
         c('Show Branch Changes', 'git.branchChanges'),
         { type: 'separator' },
         c('Share Project on GitHub…', 'git.publishGithub'),

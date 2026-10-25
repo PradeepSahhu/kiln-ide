@@ -163,3 +163,50 @@ test('checkout with conflicting local changes offers smart checkout', async () =
   assert.equal(smart.ok, true);
   assert.equal((await svc.status()).branch.head, 'other');
 });
+
+/** A repository in the middle of a merge with a conflict in shop.txt. */
+async function conflicted() {
+  const { root, svc } = await open({ 'shop.txt': 'start\ntax = 10\nend\n', 'other.txt': 'same\n' });
+  git(root, 'checkout', '-q', '-b', 'feature');
+  fs.writeFileSync(path.join(root, 'shop.txt'), 'start\ntax = 15\nend\n');
+  git(root, 'commit', '-qam', 'feature tax');
+  git(root, 'checkout', '-q', 'main');
+  fs.writeFileSync(path.join(root, 'shop.txt'), 'start\ntax = 20\nend\n');
+  git(root, 'commit', '-qam', 'main tax');
+  const r = await svc.merge('feature');
+  assert.equal(r.ok, false, 'the merge stops on the conflict');
+  return { root, svc };
+}
+
+test('merge conflicts: the conflicted files, and yours / base / theirs with a diff3 merge', async () => {
+  const { svc } = await conflicted();
+  const list = await svc.conflicts();
+  assert.deepEqual(list.map((c) => c.path), ['shop.txt']);
+  const v = await svc.mergeVersions('shop.txt');
+  assert.equal(v.ours, 'start\ntax = 20\nend\n');
+  assert.equal(v.base, 'start\ntax = 10\nend\n');
+  assert.equal(v.theirs, 'start\ntax = 15\nend\n');
+  assert.equal(v.merged, 'start\n<<<<<<< main\ntax = 20\n||||||| base\ntax = 10\n=======\ntax = 15\n>>>>>>> feature\nend\n');
+  assert.equal(v.oursLabel, 'main');
+  assert.equal(v.theirsLabel, 'feature');
+  assert.equal(v.operation, 'merge');
+});
+
+test('merge conflicts: resolving writes the result and marks the file resolved; or accept a whole side', async () => {
+  const { root, svc } = await conflicted();
+  await svc.resolveConflict('shop.txt', 'start\ntax = 18\nend\n');
+  assert.equal(fs.readFileSync(path.join(root, 'shop.txt'), 'utf8'), 'start\ntax = 18\nend\n');
+  assert.deepEqual(await svc.conflicts(), []);
+  const st = await svc.status();
+  assert.ok(st.files.some((f) => f.path === 'shop.txt' && f.staged));
+  const done = await svc.continueOperation();
+  assert.equal(done.ok, true);
+  assert.match(git(root, 'log', '-1', '--format=%s'), /Merge branch 'feature'/);
+  assert.equal(svc.repoState().merging, false);
+
+  const again = await conflicted();
+  await again.svc.acceptSide('shop.txt', 'theirs');
+  assert.equal(fs.readFileSync(path.join(again.root, 'shop.txt'), 'utf8'), 'start\ntax = 15\nend\n');
+  assert.deepEqual(await again.svc.conflicts(), []);
+  await assert.rejects(again.svc.resolveConflict('other.txt', 'x\n'), /not in conflict/);
+});

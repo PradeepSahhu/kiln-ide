@@ -14,11 +14,16 @@ export function dismissToast(id) {
   store.set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
 }
 
+const STACKABLE = new Set(['confirm', 'prompt']);
+
 /**
  * Open a modal component by type; resolves with the value it closes with. Modals stack, so a
  * confirmation opened from a dialog appears above it and returns to it.
  */
 export function openModal(type, props = {}) {
+  // A dialog that is already open is not opened a second time (a shortcut handled twice, a double
+  // click); confirmations and prompts can stack.
+  if (!STACKABLE.has(type) && store.get().modals.some((m) => m.type === type)) return Promise.resolve(null);
   return new Promise((resolve) => {
     store.set((s) => ({ modals: [...s.modals, { type, props, resolve, key: uid('m') }] }));
   });

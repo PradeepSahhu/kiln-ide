@@ -259,6 +259,11 @@ function register({ getContext, createWindow, rebuildMenu, broadcast }) {
   g('merge', (ctx, ref) => ctx.git.merge(ref));
   g('rebase', (ctx, ref) => ctx.git.rebase(ref));
   g('abort', (ctx) => ctx.git.abort());
+  g('conflicts', (ctx) => ctx.git.conflicts());
+  g('mergeVersions', (ctx, rel) => ctx.git.mergeVersions(rel));
+  g('resolveConflict', (ctx, rel, content) => ctx.git.resolveConflict(rel, content));
+  g('acceptSide', (ctx, rel, side) => ctx.git.acceptSide(rel, side));
+  g('continueOperation', (ctx) => ctx.git.continueOperation());
   g('fetch', (ctx) => ctx.git.fetch());
   g('pull', (ctx) => ctx.git.pull());
   g('push', (ctx, opts) => ctx.git.push(opts));

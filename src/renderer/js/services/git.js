@@ -1,5 +1,6 @@
 // Git state and actions for the toolbar widget, Commit and Git tool windows.
 import { store } from '../lib/store.js';
+import { checkConflicts } from './conflicts.js';
 import { invoke, on } from '../lib/ipc.js';
 import { toast, confirm, prompt, errorToast } from '../lib/ui.js';
 import { debounce } from '../lib/util.js';
@@ -51,7 +52,10 @@ export async function checkout(name, { remote = false } = {}) {
     if (ok) {
       const s = await invoke('git:smartCheckout', name, { remote });
       if (!s.ok) errorToast('Smart checkout failed', new Error(s.error));
-      else if (s.warning) toast({ kind: 'warning', title: 'Checked out with conflicts', message: s.warning, timeout: 0 });
+      else if (s.warning) {
+        toast({ kind: 'warning', title: 'Checked out with conflicts', message: s.warning, timeout: 0 });
+        setTimeout(() => checkConflicts(), 500);
+      }
       else toast({ title: `Checked out ${name}`, timeout: 2500 });
     }
   } else {
@@ -101,6 +105,7 @@ export async function mergeInto(name) {
   if (r.ok) toast({ kind: 'success', title: `Merged ${name}`, message: r.output.split('\n').slice(-2).join('\n') });
   else toast({ kind: 'error', title: `Merge of ${name} needs attention`, message: r.error, timeout: 0 });
   await refreshAll();
+  if (!r.ok) await checkConflicts();
 }
 
 export async function rebaseOnto(name) {
@@ -109,6 +114,7 @@ export async function rebaseOnto(name) {
   if (r.ok) toast({ kind: 'success', title: `Rebased onto ${name}` });
   else toast({ kind: 'error', title: 'Rebase needs attention', message: r.error, timeout: 0 });
   await refreshAll();
+  if (!r.ok) await checkConflicts();
 }
 
 export async function fetch() {
@@ -122,6 +128,7 @@ export async function pull() {
   const r = await invoke('git:pull');
   toast(r.ok ? { kind: 'success', title: 'Project updated', message: r.output.split('\n').slice(-3).join('\n'), timeout: 4000 } : { kind: 'error', title: 'Update failed', message: r.error, timeout: 0 });
   await refreshAll();
+  if (!r.ok) await checkConflicts();
 }
 
 export async function push() {
