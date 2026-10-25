@@ -3,7 +3,9 @@
 A fast, Rider-style desktop IDE for **C#/.NET**, **Python** and **agentic-AI** projects, with Git, a debugger and
 Claude built in. Built on Electron, Monaco, xterm.js and the Claude Agent SDK.
 
-![Debugger](docs/debugger.png)
+![Kiln IDE debugging a Python project](docs/screenshots/debugger-python.png)
+
+More in [Screenshots](#screenshots).
 
 ## Features
 
@@ -118,6 +120,169 @@ Claude built in. Built on Electron, Monaco, xterm.js and the Claude Agent SDK.
   terminal color with a live preview, export/import, and import VS Code color themes.
 - **Customizable keymap**: Rider (macOS) or VS Code presets, record shortcuts, multiple shortcuts per action,
   conflict warnings, search by action or by pressing a shortcut, reset per action or all.
+
+## Screenshots
+
+The screenshots are taken by the end-to-end test suite while it drives the real app (`npm run test:e2e`), so
+they show exactly what the tests check. Account emails and GitHub logins are masked.
+
+### Getting started
+
+**Welcome screen.** The toolchain check (.NET SDK, Python, Git, Node.js, uv, Claude Agent SDK) and New Solution,
+Open and Clone Repository.
+
+![Welcome screen](docs/screenshots/welcome.png)
+
+**A new Python project builds on load.** Kiln creates the `.venv`, installs the requirements, compiles and checks
+every file and runs `pip check`; each step and its output are in the Build tool window.
+
+![Python project building on load](docs/screenshots/python-project.png)
+
+**Problems.** A syntax error is listed in the Problems tool window and underlined in the editor as you save,
+with Fix with Claude.
+
+![Problems tool window](docs/screenshots/problems.png)
+
+**Run configurations.** The detected run configuration runs `main.py`; the output is in the Run tool window,
+and the editor shows usage counts above each function.
+
+![Running the app](docs/screenshots/run.png)
+
+**Terminal.** A terminal in the project with its virtual environment activated.
+
+![Terminal](docs/screenshots/terminal.png)
+
+**C# and .NET.** A console project created from the New Solution wizard, built and run with `dotnet`.
+
+![C# project running](docs/screenshots/csharp-run.png)
+
+### Code intelligence and refactoring
+
+**Find Usages.** Usages of `Calculator.Add`, grouped by file, with the declaration and the calls.
+
+![Find Usages](docs/screenshots/find-usages.png)
+
+**Refactor This.** Every refactoring that applies at the caret or selection, here in JavaScript.
+
+![Refactor This](docs/screenshots/refactor-this.png)
+
+**Extract Method (Python, rope).** The dialog previews the change in every file before anything is written.
+
+![Extract Method preview](docs/screenshots/refactor-extract-method.png)
+
+**Change Signature (C#).** Reorder, rename, add or remove parameters; the preview shows the declaration and every
+call that changes.
+
+![Change Signature](docs/screenshots/refactor-change-signature.png)
+
+**Split editor.** The same file in two splits (one document: edits show in both), a second file in the right
+split, tabs dragged between splits.
+
+![Split editor](docs/screenshots/split-editor.png)
+
+### Debugging and tests
+
+**Python debugger.** Paused at a breakpoint in `greet`: frames, locals, values shown inline in the code, and
+an expression evaluator.
+
+![Python debugger](docs/screenshots/debugger-python.png)
+
+**C# debugger.** Paused in `Calculator.Add` with netcoredbg; the arguments are shown inline and in Locals.
+
+![C# debugger](docs/screenshots/debugger-csharp.png)
+
+**A failing test.** Run from the gutter icon; the icon turns red, and the Tests tool window shows the failure
+and pytest's output.
+
+![Failing test](docs/screenshots/tests-failed.png)
+
+**Code coverage.** Run with Coverage marks the lines that ran (green) and did not run (red) in the editor, and
+the Coverage tab lists every file by percentage.
+
+![Code coverage](docs/screenshots/coverage.png)
+
+**Debug Test (.NET).** Debug Test on an xUnit test: the debugger attaches to the test host and stops at a
+breakpoint inside the test.
+
+![Debugging an xUnit test](docs/screenshots/debug-test-dotnet.png)
+
+### Git and GitHub
+
+**Branches.** The branch popup: update, commit, push, new branch, fetch, and every local branch with an × to
+delete it.
+
+![Branch popup](docs/screenshots/branch-popup.png)
+
+**Branch changes and diffs.** What the current branch changed compared with `main`, and the diff viewer.
+
+![Branch changes and diff](docs/screenshots/branch-diff.png)
+
+**Committing individual lines.** Expand a changed file and tick the hunks or single lines to commit; the rest
+stays in the working tree.
+
+![Committing individual lines](docs/screenshots/commit-lines.png)
+
+**Interactive rebase.** Reorder commits and pick, reword, squash, fix up or drop each one, from the Git log.
+
+![Interactive rebase](docs/screenshots/interactive-rebase.png)
+
+**Merge conflicts.** The Conflicts dialog lists every conflicted file: accept yours, accept theirs, or merge.
+
+![Conflicts dialog](docs/screenshots/conflicts.png)
+
+**Merge view.** Yours, the common base and theirs side by side for each conflict, above the editable result.
+
+![Merge view](docs/screenshots/merge-view.png)
+
+**GitHub connection.** Settings › Version Control: the GitHub CLI login or an access token, with a connection
+test.
+
+![GitHub connection](docs/screenshots/github.png)
+
+### Knowledge graph and message flow
+
+**Knowledge graph.** Files, classes, functions and variables with their calls, kept up to date as you edit.
+
+![Knowledge graph](docs/screenshots/knowledge-graph.png)
+
+**Knowledge graph of the main branch.** On a feature branch, the graph of `main` is kept in sync in the
+background, so agents can compare.
+
+![Main-branch knowledge graph](docs/screenshots/main-branch-graph.png)
+
+**Message flow.** Which services publish to and consume which Kafka topics, and which databases they write to.
+
+![Message flow diagram](docs/screenshots/message-flow.png)
+
+### Claude and AI agents
+
+**Claude chat.** Claude creates a file; the tool call is shown in the chat and the file opens in the editor.
+
+![Claude chat](docs/screenshots/claude.png)
+
+**Skills and MCP servers.** Every skill, slash command, agent and MCP server Claude Code has, including Kiln's
+knowledge-graph server.
+
+![Skills tool window](docs/screenshots/skills.png)
+
+**AI agents.** Give Claude Code, Codex and Gemini CLI the knowledge graph: a skill, an MCP server and
+use-it-first instructions.
+
+![AI agent settings](docs/screenshots/ai-agents.png)
+
+### Appearance and keymap
+
+**Themes.** Built-in themes for the UI, the editor and the terminal.
+
+![Themes](docs/screenshots/themes.png)
+
+**Theme editor.** Create a theme and edit every color live, with a preview; import VS Code themes.
+
+![Theme editor](docs/screenshots/theme-editor.png)
+
+**Keymap.** Rider and VS Code presets; record your own shortcuts, with conflict warnings.
+
+![Keymap](docs/screenshots/keymap.png)
 
 ## Using the knowledge graph from an agent
 

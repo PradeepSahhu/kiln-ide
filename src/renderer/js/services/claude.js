@@ -72,7 +72,11 @@ function onEdit(chatId, input) {
   const file = input && (input.file_path || input.notebook_path);
   if (!file) return;
   setChat(chatId, (c) => ({ ...c, turnEdits: [...new Set([...c.turnEdits, file])] }));
-  if (getChat(chatId).follow) ed.openFile(file, { preview: true, focus: false }).catch(() => {});
+  if (!getChat(chatId).follow) return;
+  // A file being created does not exist yet: it opens when the write is done (onFsChanged below).
+  invoke('fs:exists', file)
+    .then((exists) => exists && ed.openFile(file, { preview: true, focus: false }))
+    .catch(() => {});
 }
 
 function handleEvent(chatId, msg) {

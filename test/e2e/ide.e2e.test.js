@@ -41,7 +41,11 @@ fs.mkdirSync(shots, { recursive: true });
 
 async function shot(name) {
   try {
-    await win.screenshot({ path: path.join(shots, `${name}.png`) });
+    // Let dialogs finish fading in (finite animations only: spinners run forever).
+    await win.evaluate(() => Promise.race([Promise.all(document.getAnimations().filter((a) => a.effect && a.effect.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 1500))]));
+    // Screenshots go into the README: account emails and GitHub logins are masked.
+    const mask = [win.locator('text=/[\\w.+-]+@[\\w-]+(\\.[\\w-]+)*\\.[A-Za-z]{2,}/'), win.locator('text=/(Connected|Logged in) as /')];
+    await win.screenshot({ path: path.join(shots, `${name}.png`), mask, maskColor: '#3C3F41' });
   } catch {
     /* window closing */
   }
