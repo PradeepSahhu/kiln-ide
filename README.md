@@ -31,7 +31,7 @@ Claude built in. Built on Electron, Monaco, xterm.js and the Claude Agent SDK.
 **Editor and navigation**
 - Monaco with Rider keymap, semantic highlighting, usage counts above members, inlay hints, sticky scroll.
 - Go to Declaration / Implementation, Find Usages, Rename, quick fixes, formatting: a tree-sitter code index
-  (C#, Python, JS/TS) plus pyright and csharp-ls when available.
+  (C#, Python, JS/TS, Go, Java, Rust, C/C++, Ruby, PHP, Bash) plus pyright and csharp-ls when available.
 - Search Everywhere (double Shift), Go to File/Class/Symbol, Find/Replace in Files, Recent Files, bookmarks,
   Local History (every save, and before agents change files).
 
@@ -41,8 +41,9 @@ Claude built in. Built on Electron, Monaco, xterm.js and the Claude Agent SDK.
 - GitHub connection through the **GitHub CLI login** (`gh auth login`) or a **personal access token** from an
   environment variable (Settings › Version Control: automatic, gh, token or system credentials), with a
   connection test. Credentials reach git only through its process environment; nothing is written to git
-  config or remote URLs. Clone lists your GitHub repositories; Git › Share Project on GitHub creates a
-  repository and pushes.
+  config or remote URLs. The GitHub CLI mode uses the account you logged in with `gh auth login`, even when a
+  `GITHUB_TOKEN` for another account is set in your shell. Clone lists your GitHub repositories;
+  Git › Share Project on GitHub creates a repository and pushes.
 - Commit tool window with partial commits, stashes (create, inspect, apply, pop, drop), branch changes against
   a base branch, diff viewer, blame, Git log and console.
 

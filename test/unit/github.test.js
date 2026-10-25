@@ -119,3 +119,35 @@ test('github remotes are recognized in https and ssh form', () => {
   assert.deepEqual(gh.parseGithubRemote('git@github.com:octo/app'), { owner: 'octo', repo: 'app', https: false });
   assert.equal(gh.parseGithubRemote('https://gitlab.com/a/b.git'), null);
 });
+
+test('gh mode uses the account logged in with gh, even when a token variable for another account is set', async () => {
+  settings.update({ github: { auth: 'gh' } });
+  const dir = tmpdir('kiln-fake-gh2-');
+  // Like the real gh: an environment token takes precedence over the stored login.
+  writeTree(dir, {
+    gh: `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  if [ -n "$GITHUB_TOKEN$GH_TOKEN" ]; then echo "  ✓ Logged in to github.com account token-owner (GITHUB_TOKEN)"; else echo "  ✓ Logged in to github.com account stored-user (keyring)"; fi
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
+  cat >/dev/null
+  if [ -n "$GITHUB_TOKEN$GH_TOKEN" ]; then echo "username=token-owner"; echo "password=env-token"; else echo "username=stored-user"; echo "password=keyring-token"; fi
+  exit 0
+fi
+exit 1
+`,
+  });
+  fs.chmodSync(path.join(dir, 'gh'), 0o755);
+  const env = { ...baseEnv(), GITHUB_TOKEN: 'ghp_other_account_token' };
+  gh.resetCache();
+  const st = await gh.status({ env, ghPath: path.join(dir, 'gh') });
+  assert.equal(st.gh.user, 'stored-user', 'status shows the gh login, not the token owner');
+  const cred = credentialFor(await gh.gitEnv(env, { ghPath: path.join(dir, 'gh') }));
+  assert.equal(cred.username, 'stored-user');
+  assert.equal(cred.password, 'keyring-token');
+  // Automatic mode also prefers the gh login over the token variable.
+  settings.update({ github: { auth: 'auto' } });
+  gh.resetCache();
+  assert.equal(credentialFor(await gh.gitEnv(env, { ghPath: path.join(dir, 'gh') })).username, 'stored-user');
+});

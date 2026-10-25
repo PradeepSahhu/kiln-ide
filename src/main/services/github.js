@@ -32,10 +32,19 @@ function tokenFrom(env) {
 
 const shellQuote = (p) => `'${String(p).replace(/'/g, "'\\''")}'`;
 
+// gh lets these override its stored login. "GitHub CLI" means the account logged in with
+// `gh auth login`, so gh runs without them (a token variable may belong to another account).
+const TOKEN_VARS = ['GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_ENTERPRISE_TOKEN'];
+function ghEnv(env) {
+  const out = { ...env };
+  for (const k of TOKEN_VARS) delete out[k];
+  return out;
+}
+
 async function ghStatus(ghPath, env = process.env) {
   if (!ghPath) return { installed: false, loggedIn: false, user: null, scopes: [] };
   if (ghCache && ghCache.path === ghPath && Date.now() - ghCache.at < 60000) return ghCache.status;
-  const r = await run(ghPath, ['auth', 'status', '--hostname', 'github.com'], { env, timeout: 15000 });
+  const r = await run(ghPath, ['auth', 'status', '--hostname', 'github.com'], { env: ghEnv(env), timeout: 15000 });
   const text = `${r.stdout}\n${r.stderr}`;
   const user = (/Logged in to github\.com (?:account |as )([\w-]+)/.exec(text) || [])[1] || null;
   const scopes = ((/Token scopes:\s*(.*)/.exec(text) || [])[1] || '')
@@ -70,7 +79,10 @@ async function gitEnv(base = process.env, opts = {}) {
     n++;
   };
   add(`${SCOPE}.helper`, ''); // an empty helper resets the list: only Kiln's helper answers for github.com
-  if (mode === 'gh') add(`${SCOPE}.helper`, `!${shellQuote(ghPath)} auth git-credential`);
+  if (mode === 'gh') {
+    for (const k of TOKEN_VARS) delete env[k];
+    add(`${SCOPE}.helper`, `!${shellQuote(ghPath)} auth git-credential`);
+  }
   else {
     env.KILN_GITHUB_TOKEN = tokenFrom(base).token;
     add(`${SCOPE}.helper`, TOKEN_HELPER);
@@ -117,7 +129,7 @@ async function verify({ env = process.env } = {}) {
   resetCache();
   const mode = await effectiveMode(env, ghPath);
   if (mode === 'gh') {
-    const r = await run(ghPath, ['api', 'user', '--jq', '.login'], { env, timeout: 20000 });
+    const r = await run(ghPath, ['api', 'user', '--jq', '.login'], { env: ghEnv(env), timeout: 20000 });
     if (r.code !== 0) return { ok: false, mode, message: (r.stderr || r.stdout).trim() || 'gh could not reach GitHub' };
     const st = await ghStatus(ghPath, env);
     return { ok: true, mode, user: r.stdout.trim(), scopes: st.scopes };
@@ -138,7 +150,7 @@ async function listRepos({ env = process.env } = {}) {
   const ghPath = which('gh', env);
   const mode = await effectiveMode(env, ghPath);
   if (mode === 'gh') {
-    const r = await run(ghPath, ['repo', 'list', '--limit', '200', '--json', 'nameWithOwner,url,isPrivate,description,updatedAt'], { env, timeout: 30000 });
+    const r = await run(ghPath, ['repo', 'list', '--limit', '200', '--json', 'nameWithOwner,url,isPrivate,description,updatedAt'], { env: ghEnv(env), timeout: 30000 });
     if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || 'gh repo list failed');
     return JSON.parse(r.stdout || '[]').map((x) => ({ name: x.nameWithOwner, url: `${x.url}.git`, private: x.isPrivate, description: x.description || '', updatedAt: x.updatedAt }));
   }
@@ -157,7 +169,7 @@ async function createRepo({ name, isPrivate = true, description = '', env = proc
   if (mode === 'gh') {
     const args = ['repo', 'create', name, isPrivate ? '--private' : '--public'];
     if (description) args.push('--description', description);
-    const r = await run(ghPath, args, { env, timeout: 60000 });
+    const r = await run(ghPath, args, { env: ghEnv(env), timeout: 60000 });
     if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || 'gh repo create failed');
     const url = (r.stdout.match(/https:\/\/github\.com\/\S+/) || [])[0];
     if (!url) throw new Error('gh did not return the repository URL');
