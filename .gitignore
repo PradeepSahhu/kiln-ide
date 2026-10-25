@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+src/renderer/vendor/
+.DS_Store
+*.log
+*.kiln-backup
+.env
+.env.*

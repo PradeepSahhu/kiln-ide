@@ -1,0 +1,108 @@
+/* IDE frame: main toolbar, tool window stripes, panels, editor tabs, status bar (Rider New UI). */
+.ide { display: flex; flex-direction: column; height: 100%; }
+
+/* ---------------------------------------------------------------- toolbar */
+.toolbar {
+  height: 40px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px;
+  background: var(--bg-toolbar); border-bottom: 1px solid var(--border); -webkit-app-region: drag;
+}
+.toolbar.mac { padding-left: 80px; }
+.toolbar > * { -webkit-app-region: no-drag; }
+.toolbar .drag { -webkit-app-region: drag; flex: 1; align-self: stretch; }
+.widget {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 4px;
+  border: none; background: transparent; color: var(--text); cursor: pointer; max-width: 320px;
+}
+.widget:hover, .widget.open { background: var(--bg-hover); }
+.widget .label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.widget .chev { color: var(--text-secondary); }
+.project-badge {
+  width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; flex: none;
+  font-size: 10px; font-weight: 700; color: #fff; letter-spacing: .02em;
+}
+.toolbar .sep { width: 1px; height: 18px; background: var(--border-inner); margin: 0 4px; }
+.run-widget { display: inline-flex; align-items: center; gap: 2px; }
+.run-widget .config { max-width: 260px; font-weight: 400; }
+.icon-btn.run { color: var(--success); }
+.icon-btn.stop { color: var(--error); }
+.icon-btn.build { color: var(--text-secondary); }
+.build-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); padding: 0 6px; }
+
+/* ---------------------------------------------------------- frame layout */
+.frame { flex: 1; display: flex; min-height: 0; }
+.stripe {
+  width: 40px; flex: none; display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 4px;
+  background: var(--bg); border-right: 1px solid var(--border);
+}
+.stripe.right { border-right: none; border-left: 1px solid var(--border); }
+.stripe .stripe-btn { width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; color: var(--text-secondary); border: none; background: none; cursor: pointer; position: relative; }
+.stripe .stripe-btn:hover { background: var(--bg-hover); color: var(--text); }
+.stripe .stripe-btn.active { background: var(--bg-active); color: var(--text); }
+.stripe .stripe-btn .dot { position: absolute; right: 5px; top: 5px; width: 6px; height: 6px; border-radius: 3px; background: var(--accent); }
+.stripe .stripe-btn .dot.err { background: var(--error); }
+.stripe .group { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.stripe .stripe-sep { width: 18px; height: 1px; background: var(--border-inner); margin: 4px 0; }
+.workspace { flex: 1; display: flex; min-width: 0; }
+.center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.tool-window { display: flex; flex-direction: column; background: var(--bg); min-width: 0; min-height: 0; overflow: hidden; }
+.tool-window.left { border-right: 1px solid var(--border); }
+.tool-window.right { border-left: 1px solid var(--border); }
+.tool-window.bottom { border-top: 1px solid var(--border); }
+.tw-header { height: 36px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 12px; }
+.tw-title { font-weight: 600; white-space: nowrap; }
+.tw-tabs { display: flex; align-items: center; gap: 2px; margin-left: 8px; min-width: 0; overflow: hidden; }
+.tw-tab { height: 26px; padding: 0 10px; border-radius: 4px; border: none; background: none; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tw-tab:hover { background: var(--bg-hover); color: var(--text); }
+.tw-tab.active { background: var(--bg-active); color: var(--text); }
+.tw-tab .close { opacity: .6; }
+.tw-tab .close:hover { opacity: 1; }
+.tw-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.tw-toolbar { display: flex; align-items: center; gap: 2px; padding: 0 6px; height: 32px; flex: none; border-bottom: 1px solid var(--border-inner); }
+
+.splitter { flex: none; background: transparent; position: relative; z-index: 5; }
+.splitter.v { width: 1px; cursor: col-resize; margin: 0 -2px; padding: 0 2px; }
+.splitter.h { height: 1px; cursor: row-resize; margin: -2px 0; padding: 2px 0; }
+.splitter:hover::after, .splitter.dragging::after { content: ''; position: absolute; inset: 0; background: var(--accent); opacity: .6; }
+.splitter.v:hover::after { left: 2px; right: 2px; }
+.splitter.h:hover::after { top: 2px; bottom: 2px; }
+
+/* --------------------------------------------------------------- editor */
+.editor-area { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--bg-editor); }
+.tabs { height: 38px; flex: none; display: flex; align-items: stretch; background: var(--bg-editor); border-bottom: 1px solid var(--border-inner); overflow-x: auto; overflow-y: hidden; }
+.tabs::-webkit-scrollbar { height: 0; }
+.tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 12px; max-width: 260px; flex: none;
+  color: var(--text-secondary); cursor: pointer; position: relative; border-right: 1px solid transparent;
+}
+.tab:hover { color: var(--text); background: var(--bg-hover); }
+.tab.active { color: var(--text); }
+.tab.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
+.tab.preview .name { font-style: italic; }
+.tab .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab .close { width: 18px; height: 18px; border-radius: 3px; display: grid; place-items: center; color: var(--text-secondary); opacity: 0; }
+.tab:hover .close, .tab.active .close, .tab.dirty .close { opacity: 1; }
+.tab .close:hover { background: var(--bg-active); }
+.tab.dirty .close .icon { display: none; }
+.tab.dirty .close::before { content: ''; width: 7px; height: 7px; border-radius: 4px; background: var(--text-secondary); }
+.tab.dirty .close:hover::before { display: none; }
+.tab.dirty .close:hover .icon { display: block; }
+.tab.err .name { text-decoration: underline wavy var(--error); text-underline-offset: 3px; }
+.editor-host { flex: 1; position: relative; min-height: 0; }
+.editor-host > .mount { position: absolute; inset: 0; }
+.breadcrumbs { height: 26px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 10px; font-size: 12px; color: var(--text-secondary); border-top: 1px solid var(--border-inner); background: var(--bg-editor); overflow: hidden; white-space: nowrap; }
+.breadcrumbs .crumb { cursor: pointer; padding: 1px 4px; border-radius: 3px; display: inline-flex; align-items: center; gap: 4px; }
+.breadcrumbs .crumb:hover { background: var(--bg-hover); color: var(--text); }
+.editor-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-secondary); }
+.editor-empty .shortcuts { display: grid; grid-template-columns: auto auto; gap: 10px 28px; font-size: 13px; }
+.editor-empty .shortcuts .k { color: var(--link); text-align: right; }
+
+/* ------------------------------------------------------------ status bar */
+.statusbar { height: 26px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px; font-size: 12px; color: var(--text-secondary); background: var(--bg); border-top: 1px solid var(--border); }
+.statusbar .item { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.statusbar .item:hover { background: var(--bg-hover); color: var(--text); }
+.statusbar .progress { width: 110px; height: 4px; border-radius: 2px; background: var(--bg-active); overflow: hidden; }
+.statusbar .progress > div { height: 100%; background: var(--accent); transition: width .2s; }
+.statusbar .progress.indeterminate > div { width: 30%; animation: indet 1.2s ease-in-out infinite; }
+@keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.zen .stripe, .zen .tool-window, .zen .splitter { display: none !important; }
