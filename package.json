@@ -12,7 +12,8 @@
     "test:all": "npm test && npm run test:e2e",
     "postinstall": "node scripts/postinstall.js",
     "dist": "electron-builder --mac --arm64",
-    "dist:dir": "electron-builder --mac --arm64 --dir"
+    "dist:dir": "electron-builder --mac --arm64 --dir",
+    "icon": "electron scripts/make-icon.js"
   },
   "author": "Pradeep Sahu",
   "license": "MIT",
@@ -80,10 +81,13 @@
       ],
       "identity": null,
       "hardenedRuntime": false,
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "icon": "resources/icon.icns"
     },
     "dmg": {
-      "title": "Kiln IDE"
-    }
+      "title": "Kiln IDE",
+      "icon": "resources/icon.icns"
+    },
+    "icon": "resources/icon.png"
   }
 }

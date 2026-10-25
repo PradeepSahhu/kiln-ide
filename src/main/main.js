@@ -18,6 +18,9 @@ const githubAuth = require('./services/github-auth');
 
 registerSchemes();
 app.setName('Kiln IDE');
+// The app icon (scripts/make-icon.js). Packaged builds get it from the bundle; run from source, the
+// Dock and the window (Windows / Linux) take it from here.
+const ICON = path.join(__dirname, '..', '..', 'resources', 'icon.png');
 
 const contexts = new Map(); // webContents id -> ProjectContext
 const LIGHT_THEMES = new Set(['rider-light', 'intellij-light', 'github-light', 'solarized-light', 'catppuccin-latte']);
@@ -73,6 +76,7 @@ function createWindow(projectPath) {
     minHeight: 600,
     show: false,
     title: 'Kiln IDE',
+    icon: process.platform === 'darwin' ? undefined : ICON,
     backgroundColor: light ? '#F7F8FA' : '#1E1F22',
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 14, y: 13 },
@@ -172,6 +176,7 @@ app.on('open-file', (e, p) => {
 });
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin' && !app.isPackaged && app.dock && fs.existsSync(ICON)) app.dock.setIcon(ICON);
   registerProtocols();
   loadShellEnv();
   ipc.register({ getContext, createWindow, rebuildMenu, broadcast });

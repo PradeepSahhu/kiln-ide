@@ -139,6 +139,7 @@ KILN_OPEN=/path/to/project npm start   # open a project directly
 ```bash
 npm run dist:dir   # dist/mac-arm64/Kiln IDE.app (fast; open it from Finder or `open "dist/mac-arm64/Kiln IDE.app"`)
 npm run dist       # also dist/Kiln IDE-0.1.0-arm64.dmg and a .zip
+npm run icon       # redraw resources/icon.png and icon.icns (the Welcome screen's K tile)
 ```
 
 The build is ad-hoc signed for local use (not notarized). Helper files that other processes run (the
