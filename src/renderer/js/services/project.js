@@ -56,9 +56,12 @@ export async function openProject(path) {
   git.refreshAll();
   await restoreBuildState();
   // Restore editor tabs from the last session.
-  const tabs = (state.openTabs || []).slice(0, 20);
-  for (const t of tabs) await ed.openFile(t, { focus: false, background: false }).catch(() => {});
-  if (state.activeTab) ed.activate(`file:${state.activeTab}`);
+  // Splits and pinned tabs when they were saved; otherwise the plain list of open tabs.
+  if (!(await ed.restoreGroups(state.editorGroups).catch(() => false))) {
+    const tabs = (state.openTabs || []).slice(0, 20);
+    for (const t of tabs) await ed.openFile(t, { focus: false, background: false }).catch(() => {});
+    if (state.activeTab) ed.activate(`file:${state.activeTab}`);
+  }
   const s = store.get().settings;
   if (s.build.autoBuildOnLoad && (p.detection.kinds.length || p.detection.python || p.detection.dotnet)) startBuild({ reason: 'load' });
   loadRecent();
@@ -83,7 +86,7 @@ async function saveState() {
   const tabs = s.editor.tabs.filter((t) => t.kind === 'file').map((t) => t.path);
   const active = ed.activeFile();
   const { zen, ...layout } = s.layout;
-  await invoke('app:setProjectState', { openTabs: tabs, activeTab: active, layout, runConfig: s.runs.selected, recentFiles: (s.project.recentFiles || []).slice(0, 40) }).catch(() => {});
+  await invoke('app:setProjectState', { openTabs: tabs, activeTab: active, editorGroups: ed.groupsState(), layout, runConfig: s.runs.selected, recentFiles: (s.project.recentFiles || []).slice(0, 40) }).catch(() => {});
 }
 
 const persist = debounce(saveState, 1500);

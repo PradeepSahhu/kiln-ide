@@ -89,6 +89,23 @@
 .tab.dirty .close:hover .icon { display: block; }
 .tab.err .name { text-decoration: underline wavy var(--error); text-underline-offset: 3px; }
 .editor-host { flex: 1; position: relative; min-height: 0; }
+/* Splits: groups side by side (row) or stacked (column); the focused group's tab bar is marked. */
+.editor-root { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.editor-split { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.editor-split.split-row { flex-direction: row; }
+.editor-split.split-column { flex-direction: column; }
+.editor-split-cell { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.editor-split-cell > .editor-area, .editor-split-cell > .editor-split { flex: 1; min-width: 0; }
+.editor-area.split:not(.focused) .tab.active::after { background: var(--text-secondary); opacity: .5; }
+.tabs-fill { flex: 1; min-width: 20px; }
+.tab .pin { width: 18px; height: 18px; display: grid; place-items: center; color: var(--accent); border-radius: 3px; }
+.tab .pin:hover { background: var(--bg-active); }
+.tab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.tab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
+.drop-zone { position: absolute; z-index: 20; pointer-events: none; background: color-mix(in srgb, var(--accent) 18%, transparent); border: 1px solid var(--accent); }
+.drop-zone.center { inset: 0; }
+.drop-zone.right { top: 0; bottom: 0; right: 0; width: 50%; }
+.drop-zone.down { left: 0; right: 0; bottom: 0; height: 50%; }
 .editor-host > .mount { position: absolute; inset: 0; }
 .breadcrumbs { height: 26px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 10px; font-size: 12px; color: var(--text-secondary); border-top: 1px solid var(--border-inner); background: var(--bg-editor); overflow: hidden; white-space: nowrap; }
 .breadcrumbs .crumb { cursor: pointer; padding: 1px 4px; border-radius: 3px; display: inline-flex; align-items: center; gap: 4px; }

@@ -132,9 +132,13 @@ function getProjectState(root) {
   return load().projects[root] || {};
 }
 
+const REPLACED_PROJECT_KEYS = ['editorGroups'];
+
 function setProjectState(root, partial) {
   const projects = { ...load().projects };
   projects[root] = merge(projects[root] || {}, partial);
+  // Replaced, not merged: a merged split layout would mix the old tree with the new one.
+  for (const k of REPLACED_PROJECT_KEYS) if (partial && k in partial) projects[root][k] = partial[k];
   data = { ...data, projects };
   save();
   return projects[root];

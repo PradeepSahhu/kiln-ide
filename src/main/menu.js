@@ -219,7 +219,32 @@ function buildMenuTemplate({ recent = [], send, keymap = {} }) {
       label: 'Claude',
       submenu: [c('Open Claude', 'view.claude'), c('New Chat', 'claude.newChat'), c('Explain Selection', 'claude.explain'), c('Fix Build Problems with Claude', 'claude.fixBuild'), { type: 'separator' }, c('Ask the Artifacts Knowledge Base…', 'view.artifacts')],
     },
-    { role: 'windowMenu' },
+    {
+      label: 'Window',
+      role: 'windowMenu',
+      submenu: [
+        { role: 'minimize' },
+        ...(isMac ? [{ role: 'zoom' }] : []),
+        { type: 'separator' },
+        {
+          label: 'Editor Tabs',
+          submenu: [
+            c('Split Right', 'editor.splitRight'),
+            c('Split Down', 'editor.splitDown'),
+            c('Move Tab to Opposite Group', 'editor.moveToOppositeGroup'),
+            c('Go to Next Splitter', 'editor.nextSplit'),
+            c('Unsplit', 'editor.unsplit'),
+            c('Unsplit All', 'editor.unsplitAll'),
+            { type: 'separator' },
+            c('Pin / Unpin Tab', 'editor.pinTab'),
+            c('Close Other Tabs', 'file.closeOtherTabs'),
+            c('Close All Tabs', 'file.closeAllTabs'),
+            c('Reopen Closed Tab', 'file.reopenClosed'),
+          ],
+        },
+        ...(isMac ? [{ type: 'separator' }, { role: 'front' }] : []),
+      ],
+    },
     {
       role: 'help',
       submenu: [c('Keyboard Shortcuts', 'help.shortcuts'), { type: 'separator' }, c('Toggle Developer Tools', 'dev.tools'), c('Reload Window', 'dev.reload')],

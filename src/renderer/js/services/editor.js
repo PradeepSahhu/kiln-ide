@@ -1,32 +1,42 @@
-// Editor engine: Monaco models and tabs, saving (with Local History), live reload of files changed by
-// agents (with change highlighting), Problems markers, git gutter, blame, bookmarks and navigation.
+// Editor engine: Monaco models and tabs in one or more editor groups (splits), saving (with Local
+// History), live reload of files changed by agents (with change highlighting), Problems markers, git
+// gutter, blame, bookmarks and navigation.
+//
+// Every group (split) has its own Monaco editor and diff editor; models are shared, so an edit, a
+// marker or a breakpoint shows in every split that has the file open. The store keeps all tabs in
+// editor.tabs (each with its group) and editor.active = the active tab of the focused group.
 import { store } from '../lib/store.js';
 import { invoke, send } from '../lib/ipc.js';
 import { loadMonaco, setMonacoTheme } from '../lib/monaco.js';
 import { themeById } from '../lib/themes.js';
-import { basename, languageOf, extname, IMAGE_EXT, debounce, relative } from '../lib/util.js';
+import { basename, languageOf, extname, IMAGE_EXT, debounce, relative, uid } from '../lib/util.js';
 import { changedRegions, lineEdits } from '../lib/diff.js';
+import { leaf, layoutGroups as groupsInLayout, splitLayout, removeFromLayout, resizeLayout, neighborGroup, validLayout } from '../lib/editor-layout.js';
 import { toast, confirm } from '../lib/ui.js';
 
 let monaco = null;
-let editor = null;
-let diffEditor = null;
-const docs = new Map(); // path -> { model, savedAlt, bom, headText, decorations: {} , viewState }
+let editor = null; // the focused group's editor
+const widgets = new Map(); // group id -> { editor, diffEditor, viewStates: Map(path -> view state) }
+// Kept while a group's widgets are recreated (its place in the split layout changed).
+const groupViewStates = new Map();
+const docs = new Map(); // path -> { model, savedAlt, bom, headText, decorations: {} }
 const tabsClosed = [];
 const back = [];
 const forward = [];
 let suppressNav = false;
 const listeners = new Set();
 const LSP_LANGS = new Set(['python', 'csharp']);
+export const MAIN_GROUP = 'g1';
 
 export const onEditorEvent = (fn) => (listeners.add(fn), () => listeners.delete(fn));
 const emit = (type, data) => listeners.forEach((fn) => fn(type, data));
 
 export const getMonaco = () => monaco;
 export const getEditor = () => editor;
-export const getDiffEditor = () => diffEditor;
+export const getDiffEditor = () => (widgets.get(activeGroup()) || {}).diffEditor || null;
 export const getDoc = (p) => docs.get(p);
 export const openDocs = () => [...docs.keys()];
+export const allEditors = () => [...widgets.values()].map((w) => w.editor);
 
 function settings() {
   return store.get().settings || {};
@@ -69,25 +79,13 @@ export function editorOptions() {
   };
 }
 
-let openerRegistered = false;
-let blurHooked = false;
+let globalsReady = false;
 
-export async function initEditor(container, diffContainer) {
-  monaco = await loadMonaco();
-  setMonacoTheme(settings().theme || 'rider-dark');
-  const theme = `kiln-${themeById(settings().theme || 'rider-dark').id}`;
-  // The frame remounts when a project is closed and another one opened: replace the old widgets.
-  if (editor) editor.dispose();
-  if (diffEditor) diffEditor.dispose();
-  editor = monaco.editor.create(container, { ...editorOptions(), model: null, theme });
-  diffEditor = monaco.editor.createDiffEditor(diffContainer, { ...editorOptions(), readOnly: true, originalEditable: false, renderSideBySide: true, ignoreTrimWhitespace: false, renderOverviewRuler: true, automaticLayout: true, theme });
-
-  // Editor shortcuts (duplicate line, move line, Go to Declaration, ...) are IDE commands bound
-  // through the customizable keymap; see main.js and lib/commands.js.
-
-  // Cross-file navigation from Cmd+click / peek views opens our tabs.
-  if (monaco.editor.registerEditorOpener && !openerRegistered) {
-    openerRegistered = true;
+/** One-time Monaco set-up: cross-file navigation opens our tabs; autosave when the window blurs. */
+function initGlobals() {
+  if (globalsReady) return;
+  globalsReady = true;
+  if (monaco.editor.registerEditorOpener) {
     monaco.editor.registerEditorOpener({
       openCodeEditor(_src, resource, sel) {
         const pos = sel && (sel.startLineNumber ? { line: sel.startLineNumber, col: sel.startColumn } : sel.lineNumber ? { line: sel.lineNumber, col: sel.column } : {});
@@ -96,82 +94,96 @@ export async function initEditor(container, diffContainer) {
       },
     });
   }
+  window.addEventListener('blur', () => {
+    if (settings().editor && settings().editor.autosave) saveAll({ quiet: true });
+  });
+}
 
-  editor.onDidChangeCursorPosition(
-    debounce((e) => {
-      const m = editor.getModel();
-      if (!m) return;
-      const sel = editor.getSelection();
+/** Create the editor widgets of a group (an EditorGroup component mounted). */
+export async function attachGroup(gid, container, diffContainer) {
+  monaco = await loadMonaco();
+  setMonacoTheme(settings().theme || 'rider-dark');
+  initGlobals();
+  const theme = `kiln-${themeById(settings().theme || 'rider-dark').id}`;
+  detachGroup(gid);
+  const e = monaco.editor.create(container, { ...editorOptions(), model: null, theme });
+  const diffEditor = monaco.editor.createDiffEditor(diffContainer, { ...editorOptions(), readOnly: true, originalEditable: false, renderSideBySide: true, ignoreTrimWhitespace: false, renderOverviewRuler: true, automaticLayout: true, theme });
+  if (!groupViewStates.has(gid)) groupViewStates.set(gid, new Map());
+  const w = { editor: e, diffEditor, viewStates: groupViewStates.get(gid) };
+  widgets.set(gid, w);
+  if (gid === activeGroup() || !editor) editor = e;
+
+  // Editor shortcuts (duplicate line, move line, Go to Declaration, ...) are IDE commands bound
+  // through the customizable keymap; see main.js and lib/commands.js.
+  const focusGroup = () => {
+    if (activeGroup() !== gid) setActiveGroup(gid);
+  };
+  e.onDidFocusEditorWidget(focusGroup);
+  e.onDidChangeCursorPosition(
+    debounce((ev) => {
+      const m = e.getModel();
+      if (!m || editor !== e) return;
+      const sel = e.getSelection();
       const text = sel && !sel.isEmpty() ? m.getValueInRange(sel) : '';
-      store.update('editor', { cursor: { line: e.position.lineNumber, col: e.position.column }, selection: text, selectionLines: sel && !sel.isEmpty() ? [sel.startLineNumber, sel.endLineNumber] : null });
+      store.update('editor', { cursor: { line: ev.position.lineNumber, col: ev.position.column }, selection: text, selectionLines: sel && !sel.isEmpty() ? [sel.startLineNumber, sel.endLineNumber] : null });
     }, 60),
   );
-  editor.onDidChangeModelContent(() => {
-    const m = editor.getModel();
-    if (!m) return;
-    const path = m.uri.fsPath;
-    markDirty(path);
-    lspChange(path, m);
-    gutterUpdate(path);
-  });
-  editor.onDidBlurEditorWidget(() => {
+  e.onDidBlurEditorWidget(() => {
     if (settings().editor && settings().editor.autosave) saveAll({ quiet: true });
   });
   // Gutter: a click on a test glyph runs the test; anywhere else in the glyph/decoration margin
   // toggles a breakpoint (handled by the debugger service).
   const T = monaco.editor.MouseTargetType;
   const inGutter = (t) => t.type === T.GUTTER_GLYPH_MARGIN || t.type === T.GUTTER_LINE_DECORATIONS;
-  editor.onMouseDown((e) => {
-    if (!inGutter(e.target) || !e.event.leftButton) return;
-    const line = e.target.position && e.target.position.lineNumber;
-    const m = editor.getModel();
+  e.onMouseDown((ev) => {
+    if (!inGutter(ev.target) || !ev.event.leftButton) return;
+    const line = ev.target.position && ev.target.position.lineNumber;
+    const m = e.getModel();
     if (!m || !line) return;
     const path = m.uri.fsPath;
     const d = docs.get(path);
     const test = d && d.tests && d.tests.find((t) => t.line === line);
-    const el = e.target.element;
-    if (test && el && el.classList && el.classList.contains('test-glyph')) emit('runTest', { file: path, test, x: e.event.posx, y: e.event.posy });
-    else emit('gutterClick', { file: path, line, alt: e.event.altKey, shift: e.event.shiftKey });
+    const el = ev.target.element;
+    if (test && el && el.classList && el.classList.contains('test-glyph')) emit('runTest', { file: path, test, x: ev.event.posx, y: ev.event.posy });
+    else emit('gutterClick', { file: path, line, alt: ev.event.altKey, shift: ev.event.shiftKey });
   });
-  editor.onContextMenu((e) => {
-    if (!inGutter(e.target)) return;
-    const line = e.target.position && e.target.position.lineNumber;
-    const m = editor.getModel();
-    if (m && line) emit('gutterMenu', { file: m.uri.fsPath, line, x: e.event.posx, y: e.event.posy });
+  e.onContextMenu((ev) => {
+    if (!inGutter(ev.target)) return;
+    const line = ev.target.position && ev.target.position.lineNumber;
+    const m = e.getModel();
+    if (m && line) emit('gutterMenu', { file: m.uri.fsPath, line, x: ev.event.posx, y: ev.event.posy });
   });
-  emit('editorCreated', { editor });
-  if (!blurHooked) {
-    blurHooked = true;
-    window.addEventListener('blur', () => {
-      if (settings().editor && settings().editor.autosave) saveAll({ quiet: true });
-    });
-  }
-  // Tabs restored before the widget existed (project opened from the Welcome screen).
-  const t = activeTab();
-  if (t && t.kind === 'file') showModel(t.path);
-  return { editor, diffEditor };
+  emit('editorCreated', { editor: e, group: gid });
+  // Tabs restored before the widget existed (project opened from the Welcome screen, a new split).
+  const t = groupActiveTab(gid);
+  if (t && t.kind === 'file') showModel(t.path, gid);
+  if (blameOn) applyBlameTo(e);
+  return { editor: e, diffEditor };
 }
 
-/** Called when the editor area unmounts (project closed): models stay, widgets go. */
-export function detachEditor() {
-  if (editor) editor.dispose();
-  if (diffEditor) {
-    const m = diffEditor.getModel();
-    diffEditor.dispose();
-    if (m) {
-      m.original.dispose();
-      m.modified.dispose();
-    }
+/** An EditorGroup unmounted (split closed, project closed): its widgets go, models stay. */
+export function detachGroup(gid) {
+  const w = widgets.get(gid);
+  if (!w) return;
+  widgets.delete(gid);
+  const cur = w.editor.getModel();
+  if (cur) w.viewStates.set(cur.uri.fsPath, w.editor.saveViewState());
+  w.editor.dispose();
+  const m = w.diffEditor.getModel();
+  w.diffEditor.dispose();
+  if (m) {
+    m.original.dispose();
+    m.modified.dispose();
   }
-  editor = null;
-  diffEditor = null;
+  if (editor === w.editor) editor = widgets.has(activeGroup()) ? widgets.get(activeGroup()).editor : [...widgets.values()].map((x) => x.editor)[0] || null;
 }
 
 export function applyEditorSettings() {
-  if (!editor) return;
   const opts = editorOptions();
-  editor.updateOptions(opts);
-  diffEditor.updateOptions({ ...opts, readOnly: true });
+  for (const w of widgets.values()) {
+    w.editor.updateOptions(opts);
+    w.diffEditor.updateOptions({ ...opts, readOnly: true });
+  }
 }
 
 // ------------------------------------------------------------------ tabs
@@ -184,8 +196,44 @@ function setTabs(fn) {
   store.update('editor', (e) => ({ ...e, tabs: fn(e.tabs) }));
 }
 
+export const groups = () => store.get().editor.groups || [{ id: MAIN_GROUP, active: null }];
+export const activeGroup = () => store.get().editor.activeGroup || MAIN_GROUP;
+const groupOf = (t) => t.group || MAIN_GROUP;
+export const groupTabs = (gid) => tabs().filter((t) => groupOf(t) === gid);
+
+function groupActiveTab(gid) {
+  const g = groups().find((x) => x.id === gid);
+  return g && g.active ? tabs().find((t) => t.id === g.active) || null : null;
+}
+
+/** Tab ids are unique across groups: the main group keeps `file:<path>`, other splits add `@<group>`. */
+const fileTabId = (path, gid) => (gid === MAIN_GROUP ? `file:${path}` : `file:${path}@${gid}`);
+
+/** Make `id` the active tab of its group, and that group the focused one. */
 function setActive(id) {
-  store.update('editor', { active: id });
+  const t = id ? tabs().find((x) => x.id === id) : null;
+  const gid = t ? groupOf(t) : activeGroup();
+  store.update('editor', (e) => ({ ...e, active: id, activeGroup: gid, groups: (e.groups || groups()).map((g) => (g.id === gid ? { ...g, active: id } : g)) }));
+  const w = widgets.get(gid);
+  if (w) editor = w.editor;
+}
+
+function setGroupActive(gid, id) {
+  store.update('editor', (e) => ({ ...e, active: gid === (e.activeGroup || MAIN_GROUP) ? id : e.active, groups: (e.groups || groups()).map((g) => (g.id === gid ? { ...g, active: id } : g)) }));
+}
+
+/** Focus a group (click in its editor or tab bar): its active tab becomes editor.active. */
+export function setActiveGroup(gid) {
+  const g = groups().find((x) => x.id === gid);
+  if (!g) return;
+  store.update('editor', { activeGroup: gid, active: g.active });
+  const w = widgets.get(gid);
+  if (w) editor = w.editor;
+  const t = groupActiveTab(gid);
+  if (t && t.kind === 'file') {
+    const d = docs.get(t.path);
+    if (d && d.model) store.update('editor', { language: d.model.getLanguageId(), eol: d.eol || 'LF', encoding: d.bom ? 'UTF-8 BOM' : 'UTF-8' });
+  }
 }
 
 export function activeTab() {
@@ -251,6 +299,12 @@ async function ensureDoc(path) {
   if (r.eol === 'CRLF') model.setEOL(monaco.editor.EndOfLineSequence.CRLF);
   d = { kind: 'text', model, savedAlt: model.getAlternativeVersionId(), bom: r.bom, eol: r.eol, mtime: r.mtime, decorations: {}, headText: undefined };
   docs.set(path, d);
+  // Model events, not editor events: a file open in two splits changes once.
+  model.onDidChangeContent(() => {
+    markDirty(path);
+    lspChange(path, model);
+    gutterUpdate(path);
+  });
   if (LSP_LANGS.has(model.getLanguageId())) send('lsp:didOpen', path, model.getValue());
   applyMarkers(path);
   loadHead(path);
@@ -259,8 +313,11 @@ async function ensureDoc(path) {
   return d;
 }
 
-/** Open (or focus) a file; `preview` reuses the single preview tab like Rider's single-click. */
-export async function openFile(path, { line, col, endLine, endCol, preview = false, focus = true, background = false } = {}) {
+/**
+ * Open (or focus) a file in the focused group (or `group`); `preview` reuses the group's single
+ * preview tab like Rider's single-click.
+ */
+export async function openFile(path, { line, col, endLine, endCol, preview = false, focus = true, background = false, group } = {}) {
   if (!path) return null;
   if (!background) pushNav();
   const d = await ensureDoc(path).catch((err) => {
@@ -270,24 +327,26 @@ export async function openFile(path, { line, col, endLine, endCol, preview = fal
   if (!d) return null;
   if (background) return d;
   const kind = d.kind === 'text' ? 'file' : d.kind === 'image' ? 'image' : 'binary';
-  const id = `file:${path}`;
+  const gid = group && groups().some((g) => g.id === group) ? group : activeGroup();
+  const id = fileTabId(path, gid);
   setTabs((list) => {
     if (list.some((t) => t.id === id)) return list.map((t) => (t.id === id && !preview ? { ...t, preview: false } : t));
-    const tab = { id, kind, path, title: basename(path), preview, dirty: false };
-    const existingPreview = preview ? list.findIndex((t) => t.preview && !t.dirty) : -1;
+    const tab = { id, kind, path, title: basename(path), preview, dirty: isDirty(path), group: gid };
+    const existingPreview = preview ? list.findIndex((t) => t.preview && !t.dirty && groupOf(t) === gid) : -1;
     if (existingPreview >= 0) {
       const next = list.slice();
       next[existingPreview] = tab;
       return next;
     }
-    const activeIdx = list.findIndex((t) => t.id === store.get().editor.active);
+    const g = groups().find((x) => x.id === gid);
+    const activeIdx = list.findIndex((t) => g && t.id === g.active);
     const next = list.slice();
     next.splice(activeIdx >= 0 ? activeIdx + 1 : next.length, 0, tab);
     return next;
   });
   setActive(id);
   if (kind === 'file') {
-    showModel(path);
+    showModel(path, gid);
     if (line) reveal(line, col || 1, endLine, endCol);
     if (focus) setTimeout(() => editor && editor.focus(), 0);
   }
@@ -295,19 +354,20 @@ export async function openFile(path, { line, col, endLine, endCol, preview = fal
   return d;
 }
 
-function showModel(path) {
+function showModel(path, gid = activeGroup()) {
   const d = docs.get(path);
-  if (!d || !d.model || !editor) return;
-  const cur = editor.getModel();
-  if (cur === d.model) return;
-  if (cur) {
-    const cd = docs.get(cur.uri.fsPath);
-    if (cd) cd.viewState = editor.saveViewState();
+  const w = widgets.get(gid);
+  if (!d || !d.model || !w) return;
+  const e = w.editor;
+  const cur = e.getModel();
+  if (cur !== d.model) {
+    if (cur) w.viewStates.set(cur.uri.fsPath, e.saveViewState());
+    e.setModel(d.model);
+    const vs = w.viewStates.get(path);
+    if (vs) e.restoreViewState(vs);
+    if (blameOn) applyBlameTo(e);
   }
-  editor.setModel(d.model);
-  if (d.viewState) editor.restoreViewState(d.viewState);
-  applyBlame(path);
-  store.update('editor', { language: d.model.getLanguageId(), eol: d.eol || 'LF', encoding: d.bom ? 'UTF-8 BOM' : 'UTF-8' });
+  if (gid === activeGroup()) store.update('editor', { language: d.model.getLanguageId(), eol: d.eol || 'LF', encoding: d.bom ? 'UTF-8 BOM' : 'UTF-8' });
 }
 
 export function reveal(line, col = 1, endLine, endCol) {
@@ -315,8 +375,9 @@ export function reveal(line, col = 1, endLine, endCol) {
   const range = new monaco.Range(line, col, endLine || line, endCol || col);
   editor.setSelection(endLine ? range : new monaco.Range(line, col, line, col));
   editor.revealRangeInCenterIfOutsideViewport(range, monaco.editor.ScrollType.Smooth);
-  const ids = editor.deltaDecorations([], [{ range: new monaco.Range(line, 1, line, 1), options: { isWholeLine: true, className: 'flash-line' } }]);
-  setTimeout(() => editor && editor.deltaDecorations(ids, []), 1700);
+  const e = editor;
+  const ids = e.deltaDecorations([], [{ range: new monaco.Range(line, 1, line, 1), options: { isWholeLine: true, className: 'flash-line' } }]);
+  setTimeout(() => !e.getModel() || e.deltaDecorations(ids, []), 1700);
 }
 
 export function activate(id) {
@@ -325,38 +386,69 @@ export function activate(id) {
   pushNav();
   setActive(id);
   if (t.kind === 'file') {
-    showModel(t.path);
+    showModel(t.path, groupOf(t));
     setTimeout(() => editor && editor.focus(), 0);
   }
 }
 
+/** Keep a preview tab open (double-click on the tab). */
 export function pinTab(id) {
   setTabs((list) => list.map((t) => (t.id === id ? { ...t, preview: false } : t)));
+}
+
+/** Pinned tabs stay at the front of their group and are kept by Close Others / Close All. */
+export function togglePinned(id, pinned) {
+  setTabs((list) => {
+    const t = list.find((x) => x.id === id);
+    if (!t) return list;
+    const next = { ...t, pinned: pinned == null ? !t.pinned : !!pinned, preview: false };
+    const rest = list.filter((x) => x.id !== id);
+    const same = rest.filter((x) => groupOf(x) === groupOf(t));
+    // Pinned: after the last pinned tab of the group. Unpinned: right after the pinned ones.
+    const lastPinned = [...same].reverse().find((x) => x.pinned);
+    const firstOfGroup = same[0];
+    let at = lastPinned ? rest.indexOf(lastPinned) + 1 : firstOfGroup ? rest.indexOf(firstOfGroup) : rest.length;
+    if (!next.pinned && !lastPinned && firstOfGroup) at = rest.indexOf(firstOfGroup);
+    rest.splice(at, 0, next);
+    return rest;
+  });
 }
 
 export async function closeTab(id, { force = false } = {}) {
   const list = tabs();
   const t = list.find((x) => x.id === id);
   if (!t) return;
-  if (t.kind === 'file' && t.dirty && !force) {
+  if (t.kind === 'file' && t.dirty && !force && !list.some((x) => x.id !== id && x.path === t.path)) {
     if (settings().editor && settings().editor.autosave) await save(t.path, { quiet: true });
     else {
       const ok = await confirm({ title: 'Save changes?', message: `${t.title} has unsaved changes.`, ok: 'Save', cancel: "Don't Save" });
       if (ok) await save(t.path);
     }
   }
-  const idx = list.findIndex((x) => x.id === id);
+  const gid = groupOf(t);
+  const inGroup = groupTabs(gid);
+  const idx = inGroup.findIndex((x) => x.id === id);
   const next = list.filter((x) => x.id !== id);
   setTabs(() => next);
   if (t.kind === 'file') tabsClosed.push(t.path);
-  if (store.get().editor.active === id) {
-    const n = next[Math.min(idx, next.length - 1)];
-    if (n) activate(n.id);
-    else {
-      setActive(null);
-      if (editor) editor.setModel(null);
+  const leftInGroup = inGroup.filter((x) => x.id !== id);
+  const g = groups().find((x) => x.id === gid);
+  if (g && g.active === id) {
+    const n = leftInGroup[Math.min(idx, leftInGroup.length - 1)];
+    if (n) {
+      if (gid === activeGroup()) activate(n.id);
+      else {
+        setGroupActive(gid, n.id);
+        if (n.kind === 'file') showModel(n.path, gid);
+      }
+    } else {
+      setGroupActive(gid, null);
+      const w = widgets.get(gid);
+      if (w) w.editor.setModel(null);
     }
   }
+  // The last tab of a split closes the split.
+  if (!leftInGroup.length && groups().length > 1) closeGroup(gid);
   if (t.kind === 'file' && !next.some((x) => x.path === t.path)) disposeDoc(t.path);
 }
 
@@ -364,6 +456,7 @@ function disposeDoc(path) {
   const d = docs.get(path);
   if (!d) return;
   emit('closed', { path });
+  for (const w of widgets.values()) w.viewStates.delete(path);
   if (d.model) {
     if (LSP_LANGS.has(d.model.getLanguageId())) send('lsp:didClose', path);
     d.model.dispose();
@@ -371,8 +464,12 @@ function disposeDoc(path) {
   docs.delete(path);
 }
 
-export async function closeAll({ except } = {}) {
-  for (const t of tabs().slice()) if (t.id !== except) await closeTab(t.id);
+/** Close the tabs of a group (or all groups); pinned tabs stay unless `pinned`. */
+export async function closeAll({ except, group, pinned = false } = {}) {
+  for (const t of tabs().slice()) {
+    if (t.id === except || (group && groupOf(t) !== group) || (t.pinned && !pinned)) continue;
+    await closeTab(t.id);
+  }
 }
 
 export function reopenClosed() {
@@ -380,9 +477,10 @@ export function reopenClosed() {
   if (p) openFile(p);
 }
 
-/** Non-file tabs: diff views, graphs, previews. */
+/** Non-file tabs: diff views, graphs, previews (opened in the focused group unless already open). */
 export function openSpecial({ id, kind, title, data }) {
-  setTabs((list) => (list.some((t) => t.id === id) ? list.map((t) => (t.id === id ? { ...t, data, title } : t)) : [...list, { id, kind, title, data }]));
+  const gid = activeGroup();
+  setTabs((list) => (list.some((t) => t.id === id) ? list.map((t) => (t.id === id ? { ...t, data, title } : t)) : [...list, { id, kind, title, data, group: gid }]));
   setActive(id);
 }
 
@@ -391,15 +489,172 @@ export function openDiff({ title, original, modified, path, labels, id }) {
   openSpecial({ id: tabId, kind: 'diff', title: title || `${basename(path)} (diff)`, data: { original, modified, path, labels } });
 }
 
-export function showDiffModels(data) {
-  if (!diffEditor) return;
+export function showDiffModels(data, gid = activeGroup()) {
+  const w = widgets.get(gid);
+  if (!w) return;
   const lang = languageOf(data.path || '');
-  const prev = diffEditor.getModel();
-  diffEditor.setModel({ original: monaco.editor.createModel(data.original || '', lang), modified: monaco.editor.createModel(data.modified || '', lang) });
+  const prev = w.diffEditor.getModel();
+  w.diffEditor.setModel({ original: monaco.editor.createModel(data.original || '', lang), modified: monaco.editor.createModel(data.modified || '', lang) });
   if (prev) {
     prev.original.dispose();
     prev.modified.dispose();
   }
+}
+
+// ------------------------------------------------------------- splits
+
+export const editorLayout = () => store.get().editor.layout || leaf(MAIN_GROUP);
+
+/**
+ * Split a group to the right ('row') or down ('column'): a new group opens next to it with the same
+ * tab. Returns the new group's id.
+ */
+export async function splitGroup(dir = 'row', { tabId, move = false } = {}) {
+  const from = tabId ? groupOf(tabs().find((t) => t.id === tabId) || {}) : activeGroup();
+  const t = tabId ? tabs().find((x) => x.id === tabId) : groupActiveTab(from);
+  const gid = uid('g');
+  store.update('editor', (e) => ({ ...e, layout: splitLayout(e.layout || leaf(MAIN_GROUP), from, gid, dir), groups: [...(e.groups || groups()), { id: gid, active: null }] }));
+  if (t) await placeTab(t, gid, { move });
+  else setActiveGroup(gid);
+  return gid;
+}
+
+/** Copy (or move) a tab into another group. */
+async function placeTab(t, gid, { move = false, index } = {}) {
+  if (t.kind === 'file' || t.kind === 'image' || t.kind === 'binary') {
+    const existing = tabs().find((x) => x.path === t.path && groupOf(x) === gid && x.kind === t.kind);
+    if (!existing) {
+      const id = t.kind === 'file' ? fileTabId(t.path, gid) : `${t.kind}:${t.path}@${gid}`;
+      setTabs((list) => {
+        const next = list.slice();
+        const tab = { ...t, id, group: gid };
+        const inTarget = next.filter((x) => groupOf(x) === gid);
+        const at = index != null && inTarget[index] ? next.indexOf(inTarget[index]) : inTarget.length ? next.indexOf(inTarget[inTarget.length - 1]) + 1 : next.length;
+        next.splice(at, 0, tab);
+        return next;
+      });
+      setActive(id);
+      if (t.kind === 'file') {
+        showModel(t.path, gid);
+        const src = widgets.get(groupOf(t));
+        const dst = widgets.get(gid);
+        if (src && dst && src.editor.getModel() === docs.get(t.path).model) dst.editor.restoreViewState(src.editor.saveViewState());
+      }
+    } else activate(existing.id);
+    if (move) await closeTab(t.id, { force: true });
+  } else if (move) {
+    // Special tabs (diff, graph, merge, ...) exist once: move them.
+    setTabs((list) => list.map((x) => (x.id === t.id ? { ...x, group: gid } : x)));
+    const from = groupOf(t);
+    const left = groupTabs(from);
+    const g = groups().find((x) => x.id === from);
+    if (g && g.active === t.id) setGroupActive(from, left[0] ? left[0].id : null);
+    setActive(t.id);
+    if (!left.length && groups().length > 1) closeGroup(from);
+  } else activate(t.id);
+}
+
+/** Move a tab to another group (drag and drop, Move to Opposite Group). */
+export async function moveTab(id, gid, { index } = {}) {
+  const t = tabs().find((x) => x.id === id);
+  if (!t) return;
+  if (groupOf(t) === gid) {
+    if (index == null) return activate(id);
+    setTabs((list) => {
+      const rest = list.filter((x) => x.id !== id);
+      const inGroup = rest.filter((x) => groupOf(x) === gid);
+      const at = inGroup[index] ? rest.indexOf(inGroup[index]) : inGroup.length ? rest.indexOf(inGroup[inGroup.length - 1]) + 1 : rest.length;
+      rest.splice(at, 0, t);
+      return rest;
+    });
+    return activate(id);
+  }
+  return placeTab(t, gid, { move: true, index });
+}
+
+/** The group after this one (or before it, for the last one). */
+export function otherGroup(gid = activeGroup()) {
+  return neighborGroup(editorLayout(), gid);
+}
+
+/** Group ids in layout order (left to right, top to bottom). */
+export const layoutGroups = () => groupsInLayout(editorLayout());
+
+export async function moveToOppositeGroup(id = store.get().editor.active) {
+  const t = tabs().find((x) => x.id === id);
+  if (!t) return;
+  const target = otherGroup(groupOf(t));
+  if (target) return moveTab(id, target);
+  return splitGroup('row', { tabId: id, move: true });
+}
+
+export function focusNextGroup() {
+  const target = otherGroup();
+  if (!target) return;
+  setActiveGroup(target);
+  const w = widgets.get(target);
+  const t = groupActiveTab(target);
+  if (w && t && t.kind === 'file') setTimeout(() => w.editor.focus(), 0);
+}
+
+/** Close a split: its tabs are dropped (their documents stay open where other splits show them). */
+export function closeGroup(gid) {
+  if (groups().length < 2) return;
+  const dropped = groupTabs(gid);
+  store.update('editor', (e) => {
+    const gs = (e.groups || []).filter((g) => g.id !== gid);
+    const layout = removeFromLayout(e.layout || leaf(MAIN_GROUP), gid) || leaf(gs[0].id);
+    const nextActive = e.activeGroup === gid ? groupsInLayout(layout)[0] : e.activeGroup;
+    const g = gs.find((x) => x.id === nextActive);
+    return { ...e, tabs: e.tabs.filter((t) => groupOf(t) !== gid), groups: gs, layout, activeGroup: nextActive, active: g ? g.active : null };
+  });
+  groupViewStates.delete(gid);
+  for (const t of dropped) if (t.kind === 'file' && !tabs().some((x) => x.path === t.path)) disposeDoc(t.path);
+  const w = widgets.get(activeGroup());
+  if (w) editor = w.editor;
+}
+
+/** Unsplit: every tab goes back into the focused group. */
+export async function unsplitAll() {
+  const keep = activeGroup();
+  for (const gid of layoutGroups()) {
+    if (gid === keep) continue;
+    for (const t of groupTabs(gid)) await moveTab(t.id, keep);
+  }
+}
+
+/** Resize the split at `path` (child indexes from the root). */
+export function setSplitSizes(path, sizes) {
+  store.update('editor', (e) => ({ ...e, layout: resizeLayout(e.layout || leaf(MAIN_GROUP), path, sizes) }));
+}
+
+/** Restore splits saved with the project: { layout, groups: [{ id, tabs: [{ path, pinned }], active }] }. */
+export async function restoreGroups(saved) {
+  if (!saved || !saved.layout || !Array.isArray(saved.groups) || !saved.groups.length) return false;
+  const ids = saved.groups.map((g) => g.id);
+  if (!ids.includes(MAIN_GROUP) || !validLayout(saved.layout, ids)) return false;
+  store.update('editor', (e) => ({ ...e, layout: saved.layout, groups: ids.map((id) => ({ id, active: null })), activeGroup: MAIN_GROUP }));
+  for (const g of saved.groups) {
+    for (const t of (g.tabs || []).slice(0, 30)) {
+      await openFile(t.path, { focus: false, group: g.id }).catch(() => {});
+      if (t.pinned) togglePinned(fileTabId(t.path, g.id), true);
+    }
+    if (g.active) activate(fileTabId(g.active, g.id));
+  }
+  // Splits whose files are gone close.
+  for (const g of groups()) if (!groupTabs(g.id).length && groups().length > 1) closeGroup(g.id);
+  return true;
+}
+
+/** What restoreGroups needs. */
+export function groupsState() {
+  return {
+    layout: editorLayout(),
+    groups: groups().map((g) => {
+      const active = tabs().find((t) => t.id === g.active);
+      return { id: g.id, tabs: groupTabs(g.id).filter((t) => t.kind === 'file').map((t) => ({ path: t.path, pinned: !!t.pinned })), active: active && active.kind === 'file' ? active.path : null };
+    }),
+  };
 }
 
 // ---------------------------------------------------------------- dirty/save
@@ -566,7 +821,7 @@ function highlightChanges(path, before, after) {
   if (!regions.length) return;
   const decs = regions.map((r) => ({ range: new monaco.Range(r.start, 1, r.end, 1), options: { isWholeLine: true, className: 'ai-change-line', linesDecorationsClassName: 'ai-change-glyph', overviewRuler: { color: '#5FB865', position: monaco.editor.OverviewRulerLane.Left } } }));
   d.decorations.ai = d.model.deltaDecorations(d.decorations.ai || [], decs);
-  if (editor && editor.getModel() === d.model) editor.revealLineInCenterIfOutsideViewport(regions[0].start, monaco.editor.ScrollType.Smooth);
+  for (const e of allEditors()) if (e.getModel() === d.model) e.revealLineInCenterIfOutsideViewport(regions[0].start, monaco.editor.ScrollType.Smooth);
   clearTimeout(d.aiTimer);
   d.aiTimer = setTimeout(() => {
     if (d.model && !d.model.isDisposed()) d.decorations.ai = d.model.deltaDecorations(d.decorations.ai || [], []);
@@ -649,25 +904,26 @@ function gutterUpdateNow(path) {
 let blameOn = false;
 export async function toggleBlame() {
   blameOn = !blameOn;
-  const path = activeFile();
-  if (path) await applyBlame(path);
+  await Promise.all(allEditors().map((e) => applyBlameTo(e)));
   return blameOn;
 }
 
-async function applyBlame(path) {
-  if (!editor) return;
+/** Blame (author and date) in the line numbers of one editor, for the file it shows. */
+async function applyBlameTo(e) {
   if (!blameOn) {
-    editor.updateOptions({ lineNumbers: 'on', lineNumbersMinChars: 5 });
+    e.updateOptions({ lineNumbers: 'on', lineNumbersMinChars: 5 });
     return;
   }
-  const d = docs.get(path);
+  const m = e.getModel();
+  const d = m && docs.get(m.uri.fsPath);
   if (!d || !d.model) return;
+  const path = m.uri.fsPath;
   if (!d.blame) {
     const r = await invoke('git:blame', path, isDirty(path) ? d.model.getValue() : null).catch(() => null);
     d.blame = r;
   }
   const r = d.blame;
-  if (!r || !r.lines) return;
+  if (!r || !r.lines || e.getModel() !== m) return;
   const byLine = new Map(r.lines.map((l) => [l.line, r.commits[l.sha]]));
   const fmt = (n) => {
     const c = byLine.get(n);
@@ -676,7 +932,7 @@ async function applyBlame(path) {
     const when = c.time ? new Date(c.time).toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' }) : '';
     return `${(who.slice(0, 12) + ' ' + when).padEnd(22)} ${n}`;
   };
-  editor.updateOptions({ lineNumbers: fmt, lineNumbersMinChars: 28 });
+  e.updateOptions({ lineNumbers: fmt, lineNumbersMinChars: 28 });
 }
 
 export function invalidateBlame(path) {
@@ -821,8 +1077,8 @@ function addRecentFile(path) {
 
 export function resetEditor() {
   for (const p of [...docs.keys()]) disposeDoc(p);
-  store.update('editor', { tabs: [], active: null, cursor: null, selection: '' });
-  if (editor) editor.setModel(null);
+  store.update('editor', { tabs: [], active: null, cursor: null, selection: '', groups: [{ id: MAIN_GROUP, active: null }], activeGroup: MAIN_GROUP, layout: { type: 'leaf', group: MAIN_GROUP } });
+  for (const e of allEditors()) e.setModel(null);
   back.length = 0;
   forward.length = 0;
 }

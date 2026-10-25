@@ -421,6 +421,64 @@ test('tests (pytest): gutter icons run and debug a test, rerun failed, coverage 
   await kiln('toggleBreakpoint', testFile, 5);
 });
 
+test('split editor: split right and down, the same file in both splits, drag tabs between splits, pin, unsplit, restore', { timeout: 180000 }, async () => {
+  const dir = path.join(workspace, 'e2e_py');
+  const main = path.join(dir, 'main.py');
+  const calc = path.join(dir, 'calc.py');
+  const groupsCount = async () => (await win.$$(sel('editor-group'))).length;
+  const tabIn = (g, name) => sel('editor-tabs', `[data-group="${g}"] [data-testid="editor-tab"][data-name="${name}"]`);
+  if (!fs.existsSync(calc)) fs.writeFileSync(calc, 'def add(a, b):\n    return a + b\n');
+  await kiln('openFile', calc, 1, 1);
+  await kiln('openFile', main, 1, 1);
+  await win.click(sel('editor-tab', '[data-name="main.py"]'), { button: 'right' });
+  await win.click(sel('menu-item', '[data-label="Split Right"]'));
+  await waitFor(async () => (await groupsCount()) === 2, { message: 'two splits' });
+  const right = (await win.$$eval(sel('editor-group'), (els) => els.map((e) => e.dataset.group)))[1];
+  await win.waitForSelector(tabIn(right, 'main.py'));
+  assert.equal(await win.getAttribute(sel('editor-group', `[data-group="${right}"]`), 'data-active'), 'true', 'the new split is focused');
+
+  // One document in both splits: an edit shows in both.
+  const original = fs.readFileSync(main, 'utf8');
+  await kiln('setActiveContent', original + '# from the right split\n');
+  await waitFor(async () => (await kiln('groupTexts')).every((x) => x && x.includes('# from the right split')), { message: 'edit visible in both splits' });
+  await kiln('setActiveContent', original);
+  await run('file.save');
+
+  // Drag calc.py from the left split onto the right split's tab bar: it moves.
+  await win.dragAndDrop(tabIn('g1', 'calc.py'), sel('editor-tabs', `[data-group="${right}"]`));
+  await win.waitForSelector(tabIn(right, 'calc.py'));
+  await waitFor(async () => !(await win.$(tabIn('g1', 'calc.py'))), { message: 'calc.py left the first split' });
+  await shot('22-split-editor');
+
+  // Pinned tabs survive Close All Tabs of their split.
+  await win.click(tabIn(right, 'calc.py'), { button: 'right' });
+  await win.click(sel('menu-item', '[data-label="Pin Tab"]'));
+  await waitFor(async () => (await win.getAttribute(tabIn(right, 'calc.py'), 'data-pinned')) === 'true', { message: 'calc.py pinned' });
+  const rightTabs = await win.$$eval(sel('editor-tabs', `[data-group="${right}"] [data-testid="editor-tab"]`), (els) => els.map((e) => e.dataset.name));
+  assert.equal(rightTabs[0], 'calc.py', 'pinned tabs come first');
+  await win.click(tabIn(right, 'main.py'), { button: 'right' });
+  await win.click(sel('menu-item', '[data-label="Close All Tabs"]'));
+  await waitFor(async () => !(await win.$(tabIn(right, 'main.py'))), { message: 'unpinned tab closed' });
+  assert.ok(await win.$(tabIn(right, 'calc.py')), 'pinned tab kept');
+
+  // Split down: a nested split.
+  await run('editor.splitDown');
+  await waitFor(async () => (await groupsCount()) === 3 && !!(await win.$(sel('editor-split', '[data-dir="column"]'))), { message: 'split down' });
+  await run('editor.unsplit');
+  await waitFor(async () => (await groupsCount()) === 2, { message: 'unsplit one' });
+
+  // Splits and pinned tabs come back when the project is opened again.
+  await run('project.close');
+  await win.waitForSelector(sel('welcome'));
+  await run('project.openPath', dir);
+  await waitFor(async () => (await groupsCount()) === 2, { timeout: 30000, message: 'splits restored' });
+  await waitFor(async () => !!(await win.$(sel('editor-tab', '[data-name="calc.py"][data-pinned="true"]'))), { message: 'pinned tab restored' });
+
+  await run('editor.unsplitAll');
+  await waitFor(async () => (await groupsCount()) === 1, { message: 'unsplit all' });
+  assert.ok(await win.$(sel('editor-tab', '[data-name="calc.py"]')) && (await win.$(sel('editor-tab', '[data-name="main.py"]'))), 'every tab is in the remaining split');
+});
+
 test('creates a C# console project, builds it, runs it', { skip: !has('dotnet'), timeout: 500000 }, async () => {
   const { dir } = await createProject('dotnet-console', 'E2eCs');
   await waitBuild('success');

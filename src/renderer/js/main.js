@@ -148,6 +148,15 @@ function registerCommands() {
     { id: 'file.markdownPreview', title: 'Markdown Preview', run: needProject((p) => { const file = typeof p === 'string' ? p : ed.activeFile(); if (file) ed.openSpecial({ id: `md:${file}`, kind: 'markdown', title: `${basename(file)} (preview)`, data: { path: file } }); }) },
     { id: 'file.closeTab', title: 'Close Tab', run: () => { const t = ed.activeTab(); if (t) ed.closeTab(t.id); } },
     { id: 'file.reopenClosed', title: 'Reopen Closed Tab', run: () => ed.reopenClosed() },
+    { id: 'editor.splitRight', title: 'Split Right', run: needProject(() => ed.splitGroup('row')) },
+    { id: 'editor.splitDown', title: 'Split Down', run: needProject(() => ed.splitGroup('column')) },
+    { id: 'editor.moveToOppositeGroup', title: 'Move Tab to Opposite Group', run: needProject(() => ed.moveToOppositeGroup()) },
+    { id: 'editor.nextSplit', title: 'Go to Next Splitter', run: needProject(() => ed.focusNextGroup()) },
+    { id: 'editor.unsplit', title: 'Unsplit', run: needProject(() => ed.closeGroup(ed.activeGroup())) },
+    { id: 'editor.unsplitAll', title: 'Unsplit All', run: needProject(() => ed.unsplitAll()) },
+    { id: 'editor.pinTab', title: 'Pin / Unpin Tab', run: needProject(() => { const t = ed.activeTab(); if (t) ed.togglePinned(t.id); }) },
+    { id: 'file.closeOtherTabs', title: 'Close Other Tabs', run: needProject(() => { const t = ed.activeTab(); if (t) ed.closeAll({ except: t.id, group: ed.activeGroup() }); }) },
+    { id: 'file.closeAllTabs', title: 'Close All Tabs', run: needProject(() => ed.closeAll()) },
 
     { id: 'edit.findInFiles', title: 'Find in Files…', run: needProject((dir) => openModal('findInFiles', { dir: typeof dir === 'string' ? dir : undefined })) },
     { id: 'edit.replaceInFiles', title: 'Replace in Files…', run: needProject(() => openModal('findInFiles', { replace: true })) },
@@ -365,6 +374,12 @@ function exposeTestApi() {
         await ed.openFile(path, { line, col, endLine, endCol });
         return true;
       },
+      // Text shown by each split's editor, in layout order.
+      groupTexts: () => ed.layoutGroups().map((g) => {
+        const t = store.get().editor.tabs.find((x) => x.id === (store.get().editor.groups.find((y) => y.id === g) || {}).active);
+        const d = t && t.kind === 'file' ? ed.getDoc(t.path) : null;
+        return d && d.model ? d.model.getValue() : null;
+      }),
       // Client Y of the middle of a line in the active editor (after revealing it).
       lineY: (line) => {
         const e = ed.getEditor();

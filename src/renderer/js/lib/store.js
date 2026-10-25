@@ -54,7 +54,7 @@ export const store = createStore({
   recent: [],
   project: null, // { root, name, detection, git }
   layout: { left: 'project', right: null, bottom: 'build', leftWidth: 300, rightWidth: 460, bottomHeight: 280, zen: false },
-  editor: { tabs: [], active: null, cursor: null, selection: '', eol: 'LF', encoding: 'UTF-8', language: '' },
+  editor: { tabs: [], active: null, groups: [{ id: 'g1', active: null }], activeGroup: 'g1', layout: { type: 'leaf', group: 'g1' }, cursor: null, selection: '', eol: 'LF', encoding: 'UTF-8', language: '' },
   git: { status: null, branches: null, stashes: [], log: [], loading: false, console: [] },
   build: { running: false, id: null, steps: [], status: null, errors: 0, warnings: 0, startedAt: null, endedAt: null, mode: null },
   problems: { build: [], live: {} }, // live: { [file]: [problem] } from on-save checks / language servers

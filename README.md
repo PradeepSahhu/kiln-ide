@@ -42,6 +42,10 @@ Claude built in. Built on Electron, Monaco, xterm.js and the Claude Agent SDK.
 - Monaco with Rider keymap, semantic highlighting, usage counts above members, inlay hints, sticky scroll.
 - Go to Declaration / Implementation, Find Usages, Rename, quick fixes, formatting: a tree-sitter code index
   (C#, Python, JS/TS, Go, Java, Rust, C/C++, Ruby, PHP, Bash) plus pyright and csharp-ls when available.
+- **Split editor**: Split Right / Split Down (any number of splits, nested), the same file in several splits
+  (one document, edits show everywhere), drag tabs to reorder, onto another split, or onto a split's right /
+  bottom edge to split it; Move to Opposite Group, Go to Next Splitter, Unsplit / Unsplit All. **Pinned tabs**
+  stay first and survive Close All / Close Others. Splits and pinned tabs are restored with the project.
 - Search Everywhere (double Shift), Go to File/Class/Symbol, Find/Replace in Files, Recent Files, bookmarks,
   Local History (every save, and before agents change files).
 
@@ -157,7 +161,8 @@ KILN_E2E_SKIP_CLAUDE=1 npm run test:e2e   # skip the test that sends one small p
 The end-to-end suite creates Python (venv), C# and JavaScript projects and checks auto-build, problems, run
 configurations, the terminal, commits, branch deletion, stashes, merge conflict resolution, branch changes and diffs, Go to Declaration,
 Find Usages, refactorings in Python, C# (including Roslyn through csharp-ls) and JavaScript, running and
-debugging tests from the gutter with coverage (pytest, node:test, xUnit), the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
+debugging tests from the gutter with coverage (pytest, node:test, xUnit), split editors and pinned tabs, the
+knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
 keymap customization, Search Everywhere, Local History, skills and the knowledge-graph MCP server, installing
 the knowledge graph for agents (into a scratch home folder), the GitHub connection, and a live Claude edit. Screenshots go to
 `$TMPDIR/kiln-e2e-shots`.
