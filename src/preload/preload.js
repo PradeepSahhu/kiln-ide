@@ -3,7 +3,7 @@
 // reachable; nothing from Node is exposed directly.
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-const INVOKE = /^(app|project|fs|git|build|run|term|claude|skills|search|templates|code|lsp|flow|kafka|history|agents|tests|pkg|kb|debug):[A-Za-z]+$/;
+const INVOKE = /^(app|project|fs|git|build|run|term|claude|skills|search|templates|code|lsp|flow|kafka|history|agents|tests|pkg|kb|debug|refactor):[A-Za-z]+$/;
 const SEND = new Set(['term:write', 'term:resize', 'run:input', 'run:resize', 'app:closeReady', 'lsp:didOpen', 'lsp:didChange', 'lsp:didClose', 'lsp:didSave']);
 const EVENTS = new Set([
   'menu:command',
@@ -34,6 +34,7 @@ const EVENTS = new Set([
   'tests:output',
   'kb:event',
   'debug:event',
+  'refactor:progress',
 ]);
 
 contextBridge.exposeInMainWorld('kiln', {

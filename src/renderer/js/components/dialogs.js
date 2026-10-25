@@ -18,7 +18,7 @@ import { openProject } from '../services/project.js';
 // Which modal layer a dialog belongs to; only the topmost one reacts to Escape.
 const LayerContext = createContext({ key: null, top: true });
 
-function Modal({ title, children, footer, wide, testid, onClose, className = '' }) {
+export function Modal({ title, children, footer, wide, testid, onClose, className = '' }) {
   const layer = useContext(LayerContext);
   const layerRef = useRef(layer);
   layerRef.current = layer;

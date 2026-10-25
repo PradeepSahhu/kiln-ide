@@ -137,10 +137,29 @@ function buildMenuTemplate({ recent = [], send, keymap = {} }) {
     {
       label: 'Code',
       submenu: [
-        c('Rename…', 'refactor.rename'),
         c('Reformat Code', 'code.format'),
         c('Show Context Actions', 'code.quickFix'),
         c('Comment with Line Comment', 'edit.toggleComment'),
+      ],
+    },
+    {
+      label: 'Refactor',
+      submenu: [
+        c('Refactor This…', 'refactor.this'),
+        { type: 'separator' },
+        c('Rename…', 'refactor.rename'),
+        c('Change Signature…', 'refactor.changeSignature'),
+        c('Safe Delete…', 'refactor.safeDelete'),
+        { type: 'separator' },
+        c('Extract Method…', 'refactor.extractMethod'),
+        c('Introduce Variable…', 'refactor.introduceVariable'),
+        c('Introduce Constant…', 'refactor.introduceConstant'),
+        c('Introduce Field…', 'refactor.introduceField'),
+        c('Introduce Parameter…', 'refactor.introduceParameter'),
+        c('Inline…', 'refactor.inline'),
+        { type: 'separator' },
+        c('Move…', 'refactor.move'),
+        c('Pull Members Up…', 'refactor.pullMembersUp'),
       ],
     },
     {

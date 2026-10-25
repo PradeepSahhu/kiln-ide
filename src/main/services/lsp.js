@@ -244,7 +244,7 @@ async function dotnetRuntimeMajor() {
 }
 
 function toolsDir() {
-  return path.join(app.getPath('userData'), 'tools');
+  return process.env.KILN_TOOLS_DIR || path.join(app.getPath('userData'), 'tools');
 }
 
 function findCsharpLs() {

@@ -19,6 +19,8 @@ import * as claude from './services/claude.js';
 import { initBuild, startBuild, cancelBuild } from './services/build.js';
 import * as sessions from './services/sessions.js';
 import * as debug from './services/debug.js';
+import * as refactor from './services/refactor.js';
+import './components/RefactorDialog.js';
 import { initProject, openProject, closeProject, newFileIn } from './services/project.js';
 
 const hasProject = () => !!store.get().project;
@@ -150,6 +152,17 @@ function registerCommands() {
     { id: 'code.format', title: 'Reformat Code', run: needProject(() => lang.formatDocument()) },
     { id: 'code.quickFix', title: 'Show Context Actions', run: needProject(() => lang.quickFix()), when: editorFocused },
     { id: 'refactor.rename', title: 'Rename…', run: needProject(() => lang.renameSymbol()), when: editorFocused },
+    { id: 'refactor.this', title: 'Refactor This…', run: needProject(() => refactor.refactorThis()) },
+    { id: 'refactor.changeSignature', title: 'Change Signature…', run: needProject(() => refactor.refactorKind('changeSignature')) },
+    { id: 'refactor.extractMethod', title: 'Extract Method…', run: needProject(() => refactor.refactorKind('extractMethod')) },
+    { id: 'refactor.introduceVariable', title: 'Introduce Variable…', run: needProject(() => refactor.refactorKind('introduceVariable')) },
+    { id: 'refactor.introduceConstant', title: 'Introduce Constant…', run: needProject(() => refactor.refactorKind('introduceConstant')) },
+    { id: 'refactor.introduceField', title: 'Introduce Field…', run: needProject(() => refactor.refactorKind('introduceField')) },
+    { id: 'refactor.introduceParameter', title: 'Introduce Parameter…', run: needProject(() => refactor.refactorKind('introduceParameter')) },
+    { id: 'refactor.inline', title: 'Inline…', run: needProject(() => refactor.refactorKind('inline')) },
+    { id: 'refactor.move', title: 'Move…', run: needProject(() => refactor.refactorKind('move')) },
+    { id: 'refactor.safeDelete', title: 'Safe Delete…', run: needProject(() => refactor.refactorKind('safeDelete')) },
+    { id: 'refactor.pullMembersUp', title: 'Pull Members Up…', run: needProject(() => refactor.refactorKind('pullMembersUp')) },
 
     { id: 'navigate.searchEverywhere', title: 'Search Everywhere', run: () => (hasProject() ? openModal('searchEverywhere', { tab: 'all' }) : openModal('searchEverywhere', { tab: 'actions' })) },
     { id: 'navigate.action', title: 'Find Action…', run: () => openModal('searchEverywhere', { tab: 'actions' }) },
@@ -335,10 +348,11 @@ function exposeTestApi() {
         if (id) sessions.terminalSend(id, text);
         return !!id;
       },
-      openFile: async (path, line, col) => {
-        await ed.openFile(path, { line, col });
+      openFile: async (path, line, col, endLine, endCol) => {
+        await ed.openFile(path, { line, col, endLine, endCol });
         return true;
       },
+      lspState: (lang) => ((store.get().lsp || {})[lang] || {}).state || null,
       cursor: () => {
         const e = ed.getEditor();
         const p = e && e.getPosition();

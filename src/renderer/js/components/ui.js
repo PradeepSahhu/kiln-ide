@@ -159,7 +159,7 @@ export function PopupHost() {
   };
   let idx = -1;
   return html`<div class="overlay" onMouseDown=${closePopup}>
-    <div class="popup" style=${{ left: '50%', top: '22%', transform: 'translateX(-50%)', width: '520px' }} onMouseDown=${(e) => e.stopPropagation()}>
+    <div class="popup" data-testid=${popup.testid || 'popup'} style=${{ left: '50%', top: '22%', transform: 'translateX(-50%)', width: '520px' }} onMouseDown=${(e) => e.stopPropagation()}>
       <div class="popup-header">${popup.title}</div>
       <div class="popup-search"><input class="input" ref=${inputRef} value=${q} onInput=${(e) => { setQ(e.target.value); setSel(0); }} onKeyDown=${key} placeholder="Filter" /></div>
       <div class="popup-body">
@@ -167,9 +167,9 @@ export function PopupHost() {
           if (it.separator) return html`<div class="popup-sep"></div>`;
           idx++;
           const i = idx;
-          return html`<div class=${cls('popup-item', i === sel && 'selected')} onMouseEnter=${() => setSel(i)} onClick=${() => runAt(i)}>
+          return html`<div class=${cls('popup-item', i === sel && 'selected', it.disabled && 'disabled')} data-testid="popup-item" data-label=${it.label} onMouseEnter=${() => setSel(i)} onClick=${() => runAt(i)}>
             ${it.kind ? html`<${KindIcon} kind=${it.kind} />` : it.icon ? html`<${Icon} name=${it.icon} />` : null}
-            <span class="ellipsis">${it.label}</span>${it.hint ? html`<span class="hint" style="margin-left:auto">${it.hint}</span>` : null}
+            <span class="ellipsis">${it.label}</span>${it.shortcut ? html`<span class="shortcut">${it.shortcut}</span>` : null}${it.hint ? html`<span class="hint" style="margin-left:auto">${it.hint}</span>` : null}
           </div>`;
         })}
         ${!selectable.length ? html`<div class="empty">Nothing here</div>` : null}

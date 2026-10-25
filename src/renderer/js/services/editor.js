@@ -522,6 +522,32 @@ function minimalOperations(model, content) {
   });
 }
 
+/**
+ * Replace a document's text as one undoable step (refactorings): only changed lines are touched and
+ * Local History keeps the previous version. Returns false when the file is not open.
+ */
+export function replaceContent(path, content, label = 'Before refactoring') {
+  const d = docs.get(path);
+  if (!d || !d.model) return false;
+  const previous = d.model.getValue();
+  if (previous === content) return true;
+  invoke('history:snapshot', path, previous, label).catch(() => {});
+  d.model.pushStackElement();
+  d.model.pushEditOperations([], minimalOperations(d.model, content), () => null);
+  d.model.pushStackElement();
+  markDirty(path);
+  return true;
+}
+
+/** Select a range given as UTF-16 offsets into the document (after a refactoring). */
+export function selectOffsets(path, start, end) {
+  const d = docs.get(path);
+  if (!d || !d.model || !editor || editor.getModel() !== d.model) return;
+  const a = d.model.getPositionAt(start);
+  const b = d.model.getPositionAt(end);
+  reveal(a.lineNumber, a.column, b.lineNumber, b.column);
+}
+
 function replaceFromDisk(path, content, previous) {
   const d = docs.get(path);
   if (!d || !d.model) return;

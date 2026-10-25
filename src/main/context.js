@@ -20,6 +20,7 @@ const { PackageService } = require('./services/packages');
 const { ArtifactsKB } = require('./services/artifacts');
 const { KafkaLive } = require('./services/kafka-live');
 const { DebugService } = require('./services/debug');
+const { RefactorService } = require('./services/refactor');
 const fsSvc = require('./services/fs');
 
 // Changes to these files can add projects, dependencies or run configurations.
@@ -47,6 +48,7 @@ class ProjectContext {
     this.artifacts = new ArtifactsKB(this);
     this.kafka = new KafkaLive();
     this.debug = new DebugService(this);
+    this.refactor = new RefactorService(this);
   }
 
   send(channel, payload) {
@@ -70,6 +72,10 @@ class ProjectContext {
       onFsChange: (e) => {
         this.send('fs:changed', e);
         this.index.onFsChange(e.paths);
+        if (e.paths.some((p) => /\.(?:[cm]?[jt]sx?)$/i.test(p))) {
+          clearTimeout(this.tsTimer);
+          this.tsTimer = setTimeout(() => this.refactor.onFsChange(), 1500);
+        }
         if (e.overflow || e.paths.some((p) => MANIFEST.test(p))) this.scheduleRedetect();
       },
       onGitChange: () => {
@@ -130,6 +136,8 @@ class ProjectContext {
     clearTimeout(this.branchTimer);
     this.branchGraph.dispose();
     this.lsp.dispose();
+    clearTimeout(this.tsTimer);
+    this.refactor.dispose();
     this.tests.cancel();
     this.kafka.disconnect().catch(() => {});
     this.root = null;

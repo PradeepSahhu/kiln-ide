@@ -12,6 +12,7 @@ const path = require('path');
 const A = require('./analyzer');
 const G = require('./graph');
 const GS = require('./git-sync');
+const RS = require('../refactor/syntax-engine');
 
 const { TYPE_KINDS, CALLABLE_KINDS, LENS_KINDS, CS_DECL, CS_CONTAINERS, CS_TYPE_CONTEXT, TS_DECL } = A;
 const MAX_FILE = 1.5 * 1024 * 1024;
@@ -416,6 +417,22 @@ async function gitSync({ root, commit, ref, branch }) {
   return r;
 }
 
+// ------------------------------------------------------------ refactoring
+
+/** Syntax-tree refactorings (Safe Delete, Change Signature, ...) with the index for names and usages. */
+function refactor(params) {
+  const deps = {
+    langOf,
+    parsers,
+    isIdent: A.isIdentType,
+    read: (f) => (f === params.file && params.text != null ? params.text : fs.readFileSync(f, 'utf8')),
+    exists: (f) => fs.existsSync(f),
+    defs: (name) => (state.defsByName.get(name) || []).map(defOut),
+    refs: (name) => references({ name, includeDecl: true, limit: 5000 }).refs,
+  };
+  return RS.run(params.op, deps, params);
+}
+
 // ---------------------------------------------------------- knowledge graph
 
 const graph = (opts) => G.graphView(state, opts || {});
@@ -424,7 +441,7 @@ const findNodes = ({ query, limit }) => G.findNodes(state, { query, limit });
 
 // ------------------------------------------------------------- dispatch
 
-const handlers = { gitOpen, gitSync, init, update, definitions, references, documentSymbols, workspaceSymbols, codeLens, semanticTokens, hover, graph, neighbors, findNodes, context: contextAt, stats: () => G.statsOf(state), legend: () => ({ types: A.TOKEN_TYPES, modifiers: A.TOKEN_MODIFIERS }), save: () => save() };
+const handlers = { refactor, gitOpen, gitSync, init, update, definitions, references, documentSymbols, workspaceSymbols, codeLens, semanticTokens, hover, graph, neighbors, findNodes, context: contextAt, stats: () => G.statsOf(state), legend: () => ({ types: A.TOKEN_TYPES, modifiers: A.TOKEN_MODIFIERS }), save: () => save() };
 
 parentPort.on('message', async (msg) => {
   const fn = handlers[msg.type];

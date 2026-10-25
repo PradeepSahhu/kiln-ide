@@ -438,6 +438,9 @@ function register({ getContext, createWindow, rebuildMenu, broadcast }) {
   handle('lsp:inlayHints', (ctx, file, a, b) => ctx.lsp.inlayHints(file, a, b));
   handle('lsp:info', (ctx) => ctx.lsp.info());
   handle('lsp:restart', (ctx, lang) => ctx.lsp.restart(lang));
+  handle('refactor:available', (ctx, req) => ctx.refactor.available(req));
+  handle('refactor:info', (ctx, kind, req) => ctx.refactor.info(kind, req));
+  handle('refactor:compute', (ctx, req) => ctx.refactor.compute(req));
   handle('lsp:installCsharp', (ctx) => ctx.lsp.installCsharpLs((text) => ctx.send('templates:progress', { text })));
 
   // ------------------------------------------------ message flow/kafka

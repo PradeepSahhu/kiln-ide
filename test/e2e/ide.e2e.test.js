@@ -34,6 +34,9 @@ fs.mkdirSync(path.join(agentHome, '.claude'), { recursive: true });
 fs.mkdirSync(path.join(agentHome, '.codex'), { recursive: true });
 const workspace = tmp('kiln-e2e-ws-');
 const shots = path.join(os.tmpdir(), 'kiln-e2e-shots');
+// Tools Kiln installs on demand (rope, csharp-ls, debugpy, netcoredbg), kept between test runs.
+const toolsDir = path.join(os.tmpdir(), 'kiln-test-tools');
+fs.mkdirSync(toolsDir, { recursive: true });
 fs.mkdirSync(shots, { recursive: true });
 
 async function shot(name) {
@@ -86,8 +89,26 @@ async function waitBuild(status = 'success', timeout = 300000) {
   }, { timeout, message: `build ${status}` });
 }
 
+/** Run a refactoring command and wait for its dialog to show a preview that can be applied. */
+async function refactorDialog(command, { name, state = 'ready' } = {}) {
+  await run(command);
+  await win.waitForSelector(sel('refactor-dialog'), { timeout: 60000 }).catch(async (err) => {
+    const toasts = await win.evaluate(() => window.__kiln.store.get().toasts.map((t) => `${t.title}: ${t.message}`));
+    const state = await win.evaluate(() => JSON.stringify({ modals: window.__kiln.store.get().modals.map((m) => m.type), popup: !!window.__kiln.store.get().popup, cursor: window.__kiln.test.cursor(), tab: window.__kiln.store.get().editor.active }));
+    toasts.push(state);
+    throw new Error(`${command} opened no dialog. Toasts: ${toasts.join(' | ') || 'none'}. ${err.message.split('\n')[0]}`);
+  });
+  if (name != null) await win.fill(sel('refactor-name'), name);
+  await waitFor(async () => (await win.getAttribute(sel('refactor-state'), 'data-state')) === state, { timeout: 180000, message: `${command} preview (${state})` });
+}
+
+async function applyRefactoring() {
+  await win.click(sel('refactor-apply'));
+  await waitFor(async () => !(await win.$(sel('refactor-dialog'))), { timeout: 30000, message: 'refactoring applied' });
+}
+
 before(async () => {
-  app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, KILN_USER_DATA: userData, KILN_E2E: '1', KILN_AGENT_HOME: agentHome }, timeout: 90000 });
+  app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, KILN_USER_DATA: userData, KILN_E2E: '1', KILN_AGENT_HOME: agentHome, KILN_TOOLS_DIR: toolsDir }, timeout: 90000 });
   win = await app.firstWindow();
   win.on('pageerror', (err) => console.error('[renderer error]', err.message));
   await win.waitForSelector(sel('welcome'), { timeout: 60000 });
@@ -163,6 +184,29 @@ test('debugger stops at a breakpoint, shows frames and variables, evaluates, ste
   await waitFor(async () => (await win.getAttribute(sel('debug-panel'), 'data-state')) === 'terminated', { timeout: 60000, message: 'program finished' });
   assert.match(await kiln('debugOutput'), /Hello, world!/);
   await kiln('toggleBreakpoint', file, 5);
+});
+
+test('refactor Python: extract method with rope, preview, and safe delete reports usages', { timeout: 400000 }, async () => {
+  const file = path.join(workspace, 'e2e_py', 'shop.py');
+  const SHOP = 'TAX = 0.2\n\n\ndef total(items, discount):\n    subtotal = sum(items)\n    taxed = subtotal * (1 + TAX)\n    result = taxed - discount\n    return result\n\n\ndef report():\n    return total([1, 2], 1)\n';
+  fs.writeFileSync(file, SHOP);
+  await waitFor(async () => (await kiln('indexHas', 'report')) === true, { message: 'shop.py indexed' });
+  await kiln('openFile', file, 6, 1, 8, 1);
+  await refactorDialog('refactor.extractMethod', { name: 'apply_tax' });
+  await waitFor(async () => /apply_tax/.test(await win.textContent(sel('refactor-preview'))), { message: 'preview shows the new function' });
+  await shot('14-refactor-python-preview');
+  assert.equal(fs.readFileSync(file, 'utf8'), SHOP, 'nothing changes before Refactor');
+  await applyRefactoring();
+  await waitFor(() => /def apply_tax\(subtotal, discount\):/.test(fs.readFileSync(file, 'utf8')), { message: 'extracted function saved' });
+  assert.match(await kiln('getActiveContent'), /result = apply_tax\(subtotal, discount\)/);
+
+  await kiln('openFile', file, 4, 6);
+  await refactorDialog('refactor.safeDelete', { state: 'blocked' });
+  await win.waitForSelector(sel('refactor-usage'));
+  assert.match(await win.textContent(sel('refactor-usages')), /total\(\[1, 2\], 1\)/);
+  await win.keyboard.press('Escape');
+  await waitFor(async () => !(await win.$(sel('refactor-dialog'))), { message: 'dialog closed' });
+  assert.match(fs.readFileSync(file, 'utf8'), /def total/, 'nothing deleted');
 });
 
 test('terminal runs commands in the project', { timeout: 60000 }, async () => {
@@ -298,6 +342,39 @@ test('debugs the C# project: breakpoint in a method, locals, stop', { skip: !has
   await win.click(sel('debug-stop'));
   await waitFor(async () => (await win.getAttribute(sel('debug-panel'), 'data-state')) === 'terminated', { timeout: 30000, message: 'debug session stopped' });
   await kiln('toggleBreakpoint', calc, 5);
+});
+
+test('refactor C#: change signature updates the calls; Roslyn extract method through csharp-ls', { skip: !has('dotnet'), timeout: 600000 }, async () => {
+  const dir = path.join(workspace, 'E2eCs', 'E2eCs');
+  const calc = path.join(dir, 'Calculator.cs');
+  const program = path.join(dir, 'Program.cs');
+  await kiln('openFile', calc, 5, 30);
+  await refactorDialog('refactor.changeSignature');
+  await win.click(sel('sig-down-0'));
+  await waitFor(async () => /Add\(int b, int a\)/.test(await win.textContent(sel('sig-preview'))), { message: 'signature preview' });
+  await waitFor(async () => /Program\.cs/.test(await win.textContent(sel('refactor-preview'))), { message: 'calls in Program.cs previewed' });
+  await shot('15-refactor-change-signature');
+  await applyRefactoring();
+  await waitFor(() => /Calculator\.Add\(2, 1\)/.test(fs.readFileSync(program, 'utf8')), { message: 'calls reordered' });
+  assert.match(fs.readFileSync(calc, 'utf8'), /Add\(int b, int a\)/);
+
+  // Roslyn, through csharp-ls (installed into the tools folder kept between test runs).
+  if (!fs.existsSync(path.join(toolsDir, 'csharp-ls'))) execFileSync('dotnet', ['tool', 'install', 'csharp-ls', '--version', '0.16.0', '--tool-path', toolsDir], { stdio: 'ignore', timeout: 300000 });
+  const text = 'namespace E2eCs;\n\npublic static class Calculator\n{\n    public static int Add(int b, int a)\n    {\n        var sum = a + b;\n        return sum * 2;\n    }\n}\n';
+  await kiln('openFile', calc, 1, 1);
+  await kiln('setActiveContent', text);
+  await run('file.save');
+  await waitFor(() => fs.readFileSync(calc, 'utf8') === text, { message: 'Calculator.cs saved' });
+  await win.evaluate(() => window.kiln.invoke('lsp:restart', 'csharp'));
+  await waitFor(async () => ['ready', 'busy'].includes(await kiln('lspState', 'csharp')), { timeout: 240000, message: 'csharp-ls started' });
+  const req = { file: calc, text, start: text.indexOf('a + b'), end: text.indexOf('a + b') + 5 };
+  await waitFor(async () => (await win.evaluate((r) => window.kiln.invoke('refactor:available', r), req)).items.some((i) => i.kind === 'extractMethod' && i.engine === 'roslyn'), { timeout: 240000, interval: 2000, message: 'Roslyn offers Extract Method' });
+  await kiln('openFile', calc, 7, 19, 7, 24);
+  await refactorDialog('refactor.extractMethod', { name: 'Sum' });
+  assert.equal(await win.getAttribute(sel('refactor-state'), 'data-kind'), 'extractMethod');
+  await applyRefactoring();
+  await waitFor(() => /var sum = Sum\(b, a\);/.test(fs.readFileSync(calc, 'utf8')) && /private static int Sum\(int b, int a\)\n    \{\n        return a \+ b;/.test(fs.readFileSync(calc, 'utf8')), { message: 'Roslyn extracted Sum' });
+  assert.doesNotMatch(fs.readFileSync(calc, 'utf8'), /NewMethod/);
 });
 
 test('knowledge graph visualizer shows files and functions', { timeout: 60000 }, async () => {
@@ -511,6 +588,32 @@ test('creates a JavaScript project and runs it', { timeout: 300000 }, async () =
   await waitFor(async () => /start/.test(await win.textContent(sel('run-config'))), { message: 'npm start configuration' });
   await win.click(sel('run-button'));
   await waitFor(async () => /Hello/.test(await kiln('runText')), { message: 'node output' });
+});
+
+test('refactor JavaScript: Refactor This lists what applies; introduce variable and change signature', { timeout: 300000 }, async () => {
+  const dir = path.join(workspace, 'e2e-node');
+  const file = path.join(dir, 'price.js');
+  fs.writeFileSync(file, "'use strict';\n\nfunction total(items, discount) {\n  const subtotal = items.reduce((s, i) => s + i, 0);\n  return subtotal * 1.2 - discount;\n}\n\nconsole.log(total([1, 2], 1));\n\nmodule.exports = { total };\n");
+  await waitFor(async () => (await kiln('indexHas', 'total')) === true, { message: 'price.js indexed' });
+  await kiln('openFile', file, 5, 10, 5, 24);
+  await refactorDialog('refactor.introduceVariable', { name: 'gross' });
+  await applyRefactoring();
+  await waitFor(() => /const gross = subtotal \* 1\.2;\n  return gross - discount;/.test(fs.readFileSync(file, 'utf8')), { message: 'variable introduced' });
+
+  await kiln('openFile', file, 3, 11);
+  await run('refactor.this');
+  await win.waitForSelector(sel('refactor-this'));
+  const labels = await win.$$eval(sel('popup-item'), (els) => els.map((e) => e.getAttribute('data-label')));
+  for (const l of ['Rename…', 'Change Signature…', 'Safe Delete…']) assert.ok(labels.includes(l), `Refactor This offers ${l} (got ${labels.join(', ')})`);
+  await shot('16-refactor-this');
+  await win.click(sel('popup-item', '[data-label="Change Signature…"]'));
+  await win.waitForSelector(sel('signature-editor'));
+  await win.click(sel('sig-add'));
+  await win.fill(sel('sig-name-2'), 'currency');
+  await win.fill(sel('sig-value-2'), "'EUR'");
+  await waitFor(async () => (await win.getAttribute(sel('refactor-state'), 'data-state')) === 'ready' && /currency/.test(await win.textContent(sel('refactor-preview'))), { message: 'preview with the new parameter' });
+  await applyRefactoring();
+  await waitFor(() => /function total\(items, discount, currency\)/.test(fs.readFileSync(file, 'utf8')) && /total\(\[1, 2\], 1, 'EUR'\)/.test(fs.readFileSync(file, 'utf8')), { message: 'signature and call updated' });
 });
 
 test('Claude edits a file and the IDE shows it live', { skip: process.env.KILN_E2E_SKIP_CLAUDE === '1', timeout: 240000 }, async () => {

@@ -416,3 +416,30 @@
 .gh-status .gh-scopes { font-size: 11px; line-height: 1.5; padding-left: 22px; margin-top: -2px; }
 .graph-legend { max-width: calc(100% - 190px); }
 .graph-stats { background: var(--bg-elevated); border: 1px solid var(--border-inner); border-radius: 6px; padding: 4px 8px; }
+
+/* Refactoring dialog */
+.modal.refactor-dialog { width: min(980px, 92vw); }
+.refactor-body { display: flex; flex-direction: column; gap: 6px; }
+.refactor-body .field { margin-bottom: 4px; }
+.refactor-preview { display: flex; border: 1px solid var(--border-inner); border-radius: 6px; height: 300px; overflow: hidden; }
+.refactor-files { width: 220px; flex: none; overflow: auto; border-right: 1px solid var(--border-inner); }
+.refactor-diff { flex: 1; overflow: auto; font-size: 12px; line-height: 18px; padding: 4px 0; }
+.refactor-diff .hunk + .hunk { border-top: 1px dashed var(--border-inner); margin-top: 4px; padding-top: 4px; }
+.refactor-diff .dl { display: flex; white-space: pre; }
+.refactor-diff .dl .ln { width: 42px; flex: none; text-align: right; padding-right: 8px; color: var(--text-disabled, var(--text-secondary)); }
+.refactor-diff .dl .mark { width: 14px; flex: none; color: var(--text-secondary); }
+.refactor-diff .dl.add { background: color-mix(in srgb, var(--success, #5fb865) 16%, transparent); }
+.refactor-diff .dl.del { background: color-mix(in srgb, var(--error, #e5675f) 16%, transparent); }
+.refactor-error, .refactor-warning { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; padding: 4px 0; }
+.refactor-error { color: var(--error); }
+.refactor-usages { max-height: 140px; overflow: auto; }
+.sig-table { width: 100%; border-collapse: collapse; }
+.sig-table th { text-align: left; font-weight: 500; font-size: 11px; color: var(--text-secondary); padding: 2px 4px; }
+.sig-table td { padding: 2px 4px; }
+.sig-table td .input { width: 100%; height: 24px; }
+.sig-table tr.new td .input { border-color: var(--accent); }
+.sig-actions { white-space: nowrap; width: 1%; }
+.sig-preview { margin-top: 6px; padding: 6px 8px; background: var(--bg-input, var(--bg-secondary)); border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre; }
+.pull-members { display: flex; flex-direction: column; gap: 2px; max-height: 140px; overflow: auto; padding: 2px 0; }
+.pull-members .checkbox { gap: 8px; }
+.refactor-files .nm { flex: none; white-space: nowrap; }
