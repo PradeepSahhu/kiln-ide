@@ -7,3 +7,4 @@ src/renderer/vendor/
 *.kiln-backup
 .env
 .env.*
+.claude/settings.local.json
