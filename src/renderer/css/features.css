@@ -271,6 +271,19 @@
 .bookmark-glyph::before { content: ''; display: block; width: 8px; height: 10px; margin: 4px 0 0 6px; background: var(--accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 70%, 0 100%); }
 .test-glyph::before { content: '▶'; color: var(--success); font-size: 10px; margin-left: 4px; cursor: pointer; }
 .test-glyph.failed::before { color: var(--error); }
+.test-glyph.passed::before { content: '✓'; font-weight: 700; }
+/* Coverage from the last test run with coverage: a bar right of the git gutter and a faint line tint. */
+.cov-hit, .cov-miss { margin-left: 8px; width: 3px !important; }
+.cov-hit { background: color-mix(in srgb, var(--success) 75%, transparent); }
+.cov-miss { background: var(--error); }
+.cov-hit-line { background: color-mix(in srgb, var(--success) 7%, transparent); }
+.cov-miss-line { background: color-mix(in srgb, var(--error) 10%, transparent); }
+.cov-row { gap: 6px; }
+.cov-bar { width: 90px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--error) 55%, transparent); overflow: hidden; flex: none; }
+.cov-bar > span { display: block; height: 100%; background: var(--success); }
+.cov-pct { width: 38px; text-align: right; font-size: 12px; color: var(--text-secondary); flex: none; }
+.test-row .row-actions { display: none; gap: 2px; }
+.test-row:hover .row-actions { display: inline-flex; }
 .flash-line { animation: flash 1.6s ease-out; }
 @keyframes flash { from { background: color-mix(in srgb, var(--accent) 35%, transparent); } to { background: transparent; } }
 

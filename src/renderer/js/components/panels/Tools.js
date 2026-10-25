@@ -4,9 +4,10 @@ import { useStore, store } from '../../lib/store.js';
 import { Icon, FileIcon, KindIcon } from '../../lib/icons.js';
 import { invoke, on } from '../../lib/ipc.js';
 import { cls, basename, relative, debounce, formatDuration } from '../../lib/util.js';
-import { toast, errorToast, confirm } from '../../lib/ui.js';
+import { toast, errorToast, confirm, showContextMenu } from '../../lib/ui.js';
 import { ToolWindow, Spinner, VirtualList } from '../ui.js';
 import * as ed from '../../services/editor.js';
+import * as tests from '../../services/tests.js';
 
 // ------------------------------------------------------------ Structure
 
@@ -109,97 +110,91 @@ export function UsagesPanel({ onHide }) {
 
 // ---------------------------------------------------------------- Tests
 
+const OUTCOME_ICON = { passed: ['success', 'ok'], failed: ['error', 'sev-error'], skipped: ['minus', 'dim'] };
+const FRAMEWORK = { dotnet: '.NET', python: 'pytest', jest: 'Jest', vitest: 'Vitest', mocha: 'Mocha', node: 'node:test' };
+
+function TestRow({ p, x, selected, onSelect, busy }) {
+  const r = tests.resultFor(p.id, x);
+  const [icon, tone] = r ? OUTCOME_ICON[r.outcome] || ['minus', 'dim'] : ['dot', 'dim'];
+  const open = () => x.file && ed.openFile(x.file, { line: x.line || 1 });
+  const menu = (e) => showContextMenu(e, [
+    { label: `Run '${x.name}'`, icon: 'play', disabled: busy, run: () => tests.runTests(p.id, { filter: [x.id] }) },
+    { label: `Debug '${x.name}'`, icon: 'debug', run: () => tests.debugTest(p.id, x.id, x.name) },
+    { label: `Run '${x.name}' with Coverage`, icon: 'coverage', disabled: busy, run: () => tests.runTests(p.id, { filter: [x.id], coverage: true }) },
+    x.file ? { separator: true } : null,
+    x.file ? { label: 'Jump to Source', icon: 'file', run: open } : null,
+  ]);
+  return html`<div class=${cls('test-row', selected && 'selected')} style="padding-left:30px" data-testid="test-row" data-name=${x.name} data-outcome=${r ? r.outcome : ''} onClick=${onSelect} onDblClick=${open} onContextMenu=${menu} title=${x.id}>
+    <${Icon} name=${icon} size=${r ? 13 : 9} className=${tone} />
+    <span class="ellipsis">${x.name}</span>${r && r.durationMs != null ? html`<span class="dur">${formatDuration(r.durationMs)}</span>` : html`<span class="dur"></span>`}
+    <span class="row-actions"><button class="icon-btn sm" title="Run" data-testid="test-run" disabled=${busy} onClick=${(e) => { e.stopPropagation(); tests.runTests(p.id, { filter: [x.id] }); }}><${Icon} name="play" size=${12} className="ok" /></button><button class="icon-btn sm" title="Debug" data-testid="test-debug" onClick=${(e) => { e.stopPropagation(); tests.debugTest(p.id, x.id, x.name); }}><${Icon} name="debug" size=${12} /></button></span>
+  </div>`;
+}
+
+function CoverageView({ coverage, root }) {
+  if (!coverage) return html`<div class="empty">Run tests with coverage (the shield button) to see which lines they run.</div>`;
+  const files = Object.entries(coverage.files).filter(([f]) => !root || f.startsWith(`${root}/`)).sort((a, b) => a[1].percent - b[1].percent || a[0].localeCompare(b[0]));
+  const bar = (pct) => html`<span class="cov-bar"><span style=${{ width: `${pct}%` }}></span></span>`;
+  return html`<div class="list" data-testid="coverage-view">
+    <div class="section-title" data-testid="coverage-summary" data-percent=${coverage.summary.percent}>${coverage.summary.percent}% of ${coverage.summary.lines} lines covered in ${files.length} file${files.length === 1 ? '' : 's'}</div>
+    ${files.map(([f, c]) => html`<div class="list-row cov-row" data-testid="coverage-row" data-path=${f} data-percent=${c.percent} onClick=${() => ed.openFile(f, { line: c.uncovered[0] || 1 })} title=${`${c.covered.length} of ${c.covered.length + c.uncovered.length} lines covered`}>
+        <${FileIcon} name=${basename(f)} /><span class="ellipsis">${relative(root, f)}</span><div class="spacer"></div>${bar(c.percent)}<span class="cov-pct">${c.percent}%</span>
+      </div>`)}
+  </div>`;
+}
+
 export function TestsPanel({ onHide }) {
-  const [projects, setProjects] = useState(null);
-  const [tests, setTests] = useState({});
-  const [results, setResults] = useState({});
-  const [running, setRunning] = useState(null);
-  const [output, setOutput] = useState('');
+  const t = useStore((s) => s.tests || {});
+  const root = useStore((s) => s.project && s.project.root);
   const [sel, setSel] = useState(null);
+  const [tab, setTab] = useState('results');
   const outRef = useRef(null);
+  const { projects, discovered = {}, running, output = '', coverage, showCoverage } = t;
   useEffect(() => {
-    invoke('tests:projects').then((p) => {
-      setProjects(p);
-      for (const x of p) discover(x.id);
-    });
-    return on('tests:output', ({ text }) => setOutput((o) => (o + text).slice(-200000)));
+    tests.loadProjects({ discoverTests: true });
   }, []);
   useEffect(() => {
-    if (outRef.current) outRef.current.scrollTop = outRef.current.scrollHeight;
+    if (outRef.current && !sel) outRef.current.scrollTop = outRef.current.scrollHeight;
   }, [output]);
-  useEffect(() => {
-    const h = async (e) => {
-      if (e.detail.projectId !== '*') return runTests(e.detail.projectId, e.detail.filter);
-      const list = projects || (await invoke('tests:projects').catch(() => []));
-      for (const p of list) await runTests(p.id);
-    };
-    window.addEventListener('kiln:run-tests', h);
-    return () => window.removeEventListener('kiln:run-tests', h);
-  }, [projects]);
-  const discover = async (id) => {
-    const r = await invoke('tests:discover', id).catch((err) => ({ error: err.message, tests: [] }));
-    setTests((t) => ({ ...t, [id]: r }));
-  };
-  const runTests = async (id, filter = []) => {
-    setRunning(id);
-    setOutput('');
-    await ed.saveAll({ quiet: true });
-    try {
-      const r = await invoke('tests:run', id, filter);
-      const map = {};
-      for (const x of r.results) map[x.id] = x;
-      setResults((old) => ({ ...old, [id]: { ...(filter.length ? (old[id] || {}).map || {} : {}), ...map, map: { ...(filter.length ? ((old[id] || {}).map || {}) : {}), ...map } } }));
-      const failed = r.results.filter((x) => x.outcome === 'failed').length;
-      const passed = r.results.filter((x) => x.outcome === 'passed').length;
-      toast({ kind: failed ? 'error' : 'success', title: failed ? `${failed} test${failed === 1 ? '' : 's'} failed` : `${passed} test${passed === 1 ? '' : 's'} passed`, timeout: 4000 });
-    } catch (err) {
-      errorToast('Test run failed', err);
+  const failed = Object.values(tests.failedIds()).reduce((n, ids) => n + ids.length, 0);
+  const selected = (() => {
+    for (const p of projects || []) {
+      const x = ((discovered[p.id] && discovered[p.id].tests) || []).find((y) => y.id === sel);
+      if (x) return { p, x, r: tests.resultFor(p.id, x) };
     }
-    setRunning(null);
-  };
-  const resultFor = (pid, t) => {
-    const r = results[pid] && results[pid].map;
-    if (!r) return null;
-    return r[t.id] || Object.values(r).find((x) => x.name === t.name || t.id.endsWith(x.name) || (x.className && t.id === `${x.className}.${x.method}`));
-  };
+    return null;
+  })();
+  const none = !projects || !projects.length;
   return html`<${ToolWindow} side="bottom" title="Tests" testid="tests-panel" onHide=${onHide}
-      actions=${html`<button class="btn small" disabled=${!!running || !projects || !projects.length} onClick=${async () => { for (const p of projects) await runTests(p.id); }}><${Icon} name="play" size=${12} className="ok" />Run All</button>`}>
-    <div class="build-panel">
-      <div class="build-steps" style="width:420px">
+      tabs=${html`<button class=${cls('tw-tab', tab === 'results' && 'active')} onClick=${() => setTab('results')}>Results</button><button class=${cls('tw-tab', tab === 'coverage' && 'active')} data-testid="tests-coverage-tab" onClick=${() => setTab('coverage')}>Coverage${coverage ? html`<span class="badge">${coverage.summary.percent}%</span>` : null}</button>`}
+      actions=${html`<button class="btn small" data-testid="tests-run-all" disabled=${!!running || none} onClick=${() => tests.runAll()}><${Icon} name="play" size=${12} className="ok" />Run All</button>
+        <button class="icon-btn sm" title="Run All with Coverage" data-testid="tests-run-coverage" disabled=${!!running || none} onClick=${() => { setTab('coverage'); tests.runAll({ coverage: true }); }}><${Icon} name="coverage" /></button>
+        <button class="icon-btn sm" title=${failed ? `Rerun ${failed} Failed Test${failed === 1 ? '' : 's'}` : 'Rerun Failed Tests'} data-testid="tests-rerun-failed" disabled=${!!running || !failed} onClick=${() => tests.rerunFailed()}><${Icon} name="refresh" className=${failed ? 'sev-error' : ''} /></button>
+        <button class="icon-btn sm" title="Stop" disabled=${!running} onClick=${() => tests.cancel()}><${Icon} name="stop" className=${running ? 'sev-error' : ''} /></button>
+        ${coverage ? html`<button class=${cls('icon-btn sm', showCoverage && 'active')} title=${showCoverage ? 'Hide Coverage in the Editor' : 'Show Coverage in the Editor'} data-testid="tests-toggle-coverage" onClick=${() => tests.toggleCoverage()}><${Icon} name="eye" /></button>` : null}`}>
+    <div class="build-panel" data-running=${running ? 'true' : 'false'}>
+      <div class="build-steps" style="width:440px">
         ${!projects ? html`<div class="empty"><${Spinner} /></div>` : null}
-        ${projects && !projects.length ? html`<div class="empty">No test projects found (xUnit/NUnit/MSTest projects or pytest tests).</div>` : null}
+        ${projects && !projects.length ? html`<div class="empty">No test projects found (xUnit / NUnit / MSTest projects, pytest tests, or JavaScript tests with node:test, Jest, Vitest or Mocha).</div>` : null}
         ${(projects || []).map((p) => {
-          const t = tests[p.id];
-          const list = (t && t.tests) || [];
-          const res = Object.values((results[p.id] && results[p.id].map) || {});
-          const failed = res.filter((x) => x.outcome === 'failed').length;
-          return html`<div>
+          const d = discovered[p.id];
+          const list = (d && d.tests) || [];
+          const res = Object.values(t.results[p.id] || {});
+          const nFailed = res.filter((x) => x.outcome === 'failed').length;
+          return html`<div data-testid="test-project" data-kind=${p.kind}>
             <div class="build-step" onClick=${() => setSel(null)}>
-              ${running === p.id ? html`<${Spinner} size=${14} />` : res.length ? html`<${Icon} name=${failed ? 'error' : 'success'} size=${14} className=${failed ? 'sev-error' : 'ok'} />` : html`<${Icon} name="test" size=${14} className="muted" />`}
-              <span class="title" style="font-weight:600">${p.name}</span><span class="detail">${p.kind === 'dotnet' ? '.NET' : 'pytest'} · ${list.length} tests</span>
-              <span class="time"><button class="icon-btn sm" title="Run" disabled=${!!running} onClick=${(e) => { e.stopPropagation(); runTests(p.id); }}><${Icon} name="play" size=${13} className="ok" /></button><button class="icon-btn sm" title="Rediscover" onClick=${(e) => { e.stopPropagation(); discover(p.id); }}><${Icon} name="refresh" size=${13} /></button></span>
+              ${running === p.id ? html`<${Spinner} size=${14} />` : res.length ? html`<${Icon} name=${nFailed ? 'error' : 'success'} size=${14} className=${nFailed ? 'sev-error' : 'ok'} />` : html`<${Icon} name="test" size=${14} className="muted" />`}
+              <span class="title" style="font-weight:600">${p.name}</span><span class="detail">${FRAMEWORK[p.framework || p.kind] || p.kind} · ${d ? `${list.length} tests` : 'finding tests…'}${res.length ? ` · ${res.length - nFailed}/${res.length} passed` : ''}</span>
+              <span class="time"><button class="icon-btn sm" title="Run" disabled=${!!running} onClick=${(e) => { e.stopPropagation(); tests.runTests(p.id); }}><${Icon} name="play" size=${13} className="ok" /></button><button class="icon-btn sm" title="Run with Coverage" disabled=${!!running} onClick=${(e) => { e.stopPropagation(); setTab('coverage'); tests.runTests(p.id, { coverage: true }); }}><${Icon} name="coverage" size=${13} /></button><button class="icon-btn sm" title="Find Tests Again" onClick=${(e) => { e.stopPropagation(); tests.discover(p.id); }}><${Icon} name="refresh" size=${13} /></button></span>
             </div>
-            ${t && t.error ? html`<div class="empty sev-warning" style="font-size:12px;text-align:left">${t.error}</div>` : null}
-            ${list.map((x) => {
-              const r = resultFor(p.id, x);
-              return html`<div class=${cls('test-row', sel === x.id && 'selected')} style="padding-left:30px" onClick=${() => setSel(x.id)} onDblClick=${() => runTests(p.id, [x.id])} title=${x.id}>
-                <${Icon} name=${!r ? 'dot' : r.outcome === 'passed' ? 'success' : r.outcome === 'failed' ? 'error' : 'minus'} size=${r ? 13 : 9} className=${!r ? 'dim' : r.outcome === 'passed' ? 'ok' : r.outcome === 'failed' ? 'sev-error' : 'dim'} />
-                <span class="ellipsis">${x.name}</span>${r && r.durationMs != null ? html`<span class="dur">${formatDuration(r.durationMs)}</span>` : null}
-              </div>`;
-            })}
+            ${d && d.error ? html`<div class="empty sev-warning" style="font-size:12px;text-align:left">${d.error}</div>` : null}
+            ${list.map((x) => html`<${TestRow} key=${x.id} p=${p} x=${x} busy=${!!running} selected=${sel === x.id} onSelect=${() => setSel(x.id)} />`)}
           </div>`;
         })}
       </div>
-      <div class="text-output" ref=${outRef}>${(() => {
-        if (sel) {
-          for (const p of projects || []) {
-            const t = ((tests[p.id] && tests[p.id].tests) || []).find((x) => x.id === sel);
-            const r = t && resultFor(p.id, t);
-            if (r) return `${r.outcome.toUpperCase()}  ${r.id}\n\n${r.message || ''}\n${r.stack || ''}\n${r.output || ''}`;
-          }
-        }
-        return output.replace(/\x1b\[[0-9;]*m/g, '') || 'Test output appears here.';
-      })()}</div>
+      ${tab === 'coverage'
+        ? html`<div class="col grow" style="min-width:0"><${CoverageView} coverage=${coverage} root=${root} /></div>`
+        : html`<div class="text-output" ref=${outRef} data-testid="tests-output">${selected && selected.r ? `${selected.r.outcome.toUpperCase()}  ${selected.r.id}\n\n${selected.r.message || ''}\n${selected.r.stack || ''}\n${selected.r.output || ''}` : output.replace(/\x1b\[[0-9;]*m/g, '') || 'Test output appears here.'}</div>`}
     </div>
   <//>`;
 }

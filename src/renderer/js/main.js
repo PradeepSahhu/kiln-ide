@@ -5,7 +5,7 @@ import { html, render } from './lib/preact.js';
 import { store } from './lib/store.js';
 import { invoke, on } from './lib/ipc.js';
 import { registerAll, run, installKeyHandlers, setKeymap } from './lib/commands.js';
-import { openModal, openPopup, toast } from './lib/ui.js';
+import { openModal, openPopup, toast, closeAllModals } from './lib/ui.js';
 import { applyThemeVars, setCustomThemes } from './lib/themes.js';
 import { setMonacoTheme } from './lib/monaco.js';
 import { basename, dirname, relative, sleep } from './lib/util.js';
@@ -20,6 +20,7 @@ import { initBuild, startBuild, cancelBuild } from './services/build.js';
 import * as sessions from './services/sessions.js';
 import * as debug from './services/debug.js';
 import * as refactor from './services/refactor.js';
+import * as tests from './services/tests.js';
 import './components/RefactorDialog.js';
 import './components/ConflictsDialog.js';
 import { showConflicts } from './services/conflicts.js';
@@ -187,7 +188,15 @@ function registerCommands() {
     { id: 'run.run', title: 'Run', run: needProject(() => { const c = selectedRunConfig(); if (c) sessions.startRun(c); else run('run.editConfigurations'); }) },
     { id: 'run.stop', title: 'Stop', run: () => { for (const s of store.get().runs.sessions) if (s.running) sessions.stopRun(s.id); debug.stopDebug(); } },
     { id: 'run.editConfigurations', title: 'Edit Configurations…', run: needProject(() => openModal('runConfigs')) },
-    { id: 'tests.runAll', title: 'Run All Tests', run: needProject(async () => { openTool('bottom', 'tests'); await sleep(300); window.dispatchEvent(new CustomEvent('kiln:run-tests', { detail: { projectId: '*' } })); }) },
+    { id: 'tests.runAll', title: 'Run All Tests', run: needProject(() => tests.runAll()) },
+    { id: 'tests.runAllCoverage', title: 'Run All Tests with Coverage', run: needProject(() => tests.runAll({ coverage: true })) },
+    { id: 'tests.rerunFailed', title: 'Rerun Failed Tests', run: needProject(() => tests.rerunFailed()) },
+    { id: 'tests.rerunLast', title: 'Repeat Last Test Run', run: needProject(() => tests.rerunLast()) },
+    { id: 'tests.runAtCaret', title: 'Run Test at Caret', run: needProject(() => tests.testAtCaretAction('run')) },
+    { id: 'tests.debugAtCaret', title: 'Debug Test at Caret', run: needProject(() => tests.testAtCaretAction('debug')) },
+    { id: 'tests.coverageAtCaret', title: 'Run Test at Caret with Coverage', run: needProject(() => tests.testAtCaretAction('coverage')) },
+    { id: 'tests.toggleCoverage', title: 'Show / Hide Coverage in the Editor', run: needProject(() => tests.toggleCoverage()) },
+    { id: 'tests.stop', title: 'Stop Test Run', run: () => tests.cancel() },
 
     { id: 'git.commit', title: 'Commit…', run: needProject(() => { openTool('left', 'commit'); store.set({ commitTab: { tab: 'commit', t: Date.now() } }); setTimeout(() => { const el = document.querySelector('[data-testid="commit-message"]'); if (el) el.focus(); }, 60); }) },
     { id: 'git.push', title: 'Push…', run: needProject(() => git.push()) },
@@ -327,6 +336,7 @@ function followTitle() {
 function exposeTestApi() {
   window.__kiln = {
     store,
+    closeAllModals,
     // Commands may wait on dialogs; tests only need them started, so cap the wait.
     run: async (id, arg) => {
       await Promise.race([run(id, arg), sleep(1500)]);
@@ -354,6 +364,14 @@ function exposeTestApi() {
       openFile: async (path, line, col, endLine, endCol) => {
         await ed.openFile(path, { line, col, endLine, endCol });
         return true;
+      },
+      // Client Y of the middle of a line in the active editor (after revealing it).
+      lineY: (line) => {
+        const e = ed.getEditor();
+        if (!e || !e.getModel()) return null;
+        e.revealLineInCenterIfOutsideViewport(line);
+        const pos = e.getScrolledVisiblePosition({ lineNumber: line, column: 1 });
+        return pos ? e.getDomNode().getBoundingClientRect().top + pos.top + pos.height / 2 : null;
       },
       lspState: (lang) => ((store.get().lsp || {})[lang] || {}).state || null,
       cursor: () => {
@@ -388,6 +406,7 @@ async function boot() {
   claude.initClaude();
   initProject();
   debug.initDebug();
+  tests.initTests();
   installKeyHandlers();
   followSettings();
   followTitle();

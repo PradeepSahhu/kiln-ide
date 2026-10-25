@@ -105,10 +105,12 @@ export function ContextMenu() {
     if (!menu) return undefined;
     const close = () => closeContextMenu();
     const key = (e) => e.key === 'Escape' && close();
-    window.addEventListener('mousedown', close);
+    // After the current event: a menu opened from a mousedown (gutter icons) must not close on it.
+    const t = setTimeout(() => window.addEventListener('mousedown', close), 0);
     window.addEventListener('keydown', key);
     window.addEventListener('blur', close);
     return () => {
+      clearTimeout(t);
       window.removeEventListener('mousedown', close);
       window.removeEventListener('keydown', key);
       window.removeEventListener('blur', close);
@@ -119,7 +121,7 @@ export function ContextMenu() {
     ${menu.items.map((it) =>
       it.separator
         ? html`<div class="sep"></div>`
-        : html`<div class=${cls('item', it.disabled && 'disabled', it.danger && 'danger')} onClick=${() => { if (it.disabled) return; closeContextMenu(); it.run && it.run(); }}>
+        : html`<div class=${cls('item', it.disabled && 'disabled', it.danger && 'danger')} data-testid="menu-item" data-label=${it.label} onClick=${() => { if (it.disabled) return; closeContextMenu(); it.run && it.run(); }}>
             ${it.icon ? html`<${Icon} name=${it.icon} />` : html`<span style="width:16px"></span>`}
             <span>${it.label}</span>${it.shortcut ? html`<span class="shortcut">${it.shortcut}</span>` : null}
           </div>`,

@@ -209,6 +209,7 @@ function register({ getContext, createWindow, rebuildMenu, broadcast }) {
   handle('debug:check', (ctx, cfg) => ctx.debug.check(cfg));
   handle('debug:start', (ctx, cfg, opts) => ctx.debug.start(cfg, opts || {}));
   handle('debug:startFile', (ctx, file, opts) => ctx.debug.startFile(file, opts || {}));
+  handle('debug:startTest', (ctx, projectId, testId, opts) => ctx.debug.startTest(projectId, testId, opts || {}));
   handle('debug:restart', (ctx) => ctx.debug.restart());
   handle('debug:stop', (ctx) => ctx.debug.stop());
   handle('debug:continue', (ctx, threadId) => ctx.debug.continue(threadId));
@@ -475,7 +476,8 @@ function register({ getContext, createWindow, rebuildMenu, broadcast }) {
   // ------------------------------------------------------------- tests
   handle('tests:projects', (ctx) => ctx.tests.projects());
   handle('tests:discover', (ctx, id) => ctx.tests.discover(id));
-  handle('tests:run', (ctx, id, filter) => ctx.tests.runTests(id, { filter, onOutput: (text) => ctx.send('tests:output', { id, text }) }));
+  handle('tests:run', (ctx, id, filter, opts = {}) => ctx.tests.runTests(id, { filter, coverage: !!opts.coverage, onOutput: (text) => ctx.send('tests:output', { id, text }) }));
+  handle('tests:scan', (ctx, file, text) => ctx.tests.scanFile(file, text));
   handle('tests:cancel', (ctx) => ctx.tests.cancel());
 
   // ----------------------------------------------------------- packages

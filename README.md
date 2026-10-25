@@ -28,6 +28,16 @@ Claude built in. Built on Electron, Monaco, xterm.js and the Claude Agent SDK.
 - Step over/into/out, run to cursor, pause, rerun; frames and threads; variables tree with editable values;
   watches; evaluate expressions; debug console REPL; values shown inline next to the code and on hover.
 
+**Unit tests and coverage**
+- Tests tool window for .NET (xUnit, NUnit, MSTest), pytest and JavaScript (node:test, Jest, Vitest, Mocha):
+  Run All, run one test or a project, **Rerun Failed**, stop; results with durations, messages and stacks.
+- Run / Debug icons in the editor gutter next to every test (they turn green or red with the last result),
+  plus Run / Debug Test at Caret. **Debug Test** works for pytest, node:test, Jest and Mocha, and for .NET
+  tests (the debugger attaches to the test host that `dotnet test` starts).
+- **Code coverage**: Run with Coverage marks covered and uncovered lines in the editor and lists every file
+  by percentage. Coverage comes from coverlet for .NET (in the xUnit template), coverage.py for Python
+  (installed into Kiln's tools folder on first use) and the runner's own coverage for JavaScript.
+
 **Editor and navigation**
 - Monaco with Rider keymap, semantic highlighting, usage counts above members, inlay hints, sticky scroll.
 - Go to Declaration / Implementation, Find Usages, Rename, quick fixes, formatting: a tree-sitter code index
@@ -145,7 +155,8 @@ KILN_E2E_SKIP_CLAUDE=1 npm run test:e2e   # skip the test that sends one small p
 
 The end-to-end suite creates Python (venv), C# and JavaScript projects and checks auto-build, problems, run
 configurations, the terminal, commits, branch deletion, stashes, merge conflict resolution, branch changes and diffs, Go to Declaration,
-Find Usages, refactorings in Python, C# (including Roslyn through csharp-ls) and JavaScript, the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
+Find Usages, refactorings in Python, C# (including Roslyn through csharp-ls) and JavaScript, running and
+debugging tests from the gutter with coverage (pytest, node:test, xUnit), the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
 keymap customization, Search Everywhere, Local History, skills and the knowledge-graph MCP server, installing
 the knowledge graph for agents (into a scratch home folder), the GitHub connection, and a live Claude edit. Screenshots go to
 `$TMPDIR/kiln-e2e-shots`.

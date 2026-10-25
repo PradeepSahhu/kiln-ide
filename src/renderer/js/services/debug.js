@@ -510,6 +510,17 @@ export async function debugFile(file) {
   }
 }
 
+/** Debug one test (gutter icon, Tests tool window). */
+export async function debugTest(projectId, testId, name) {
+  await ed.saveAll({ quiet: true });
+  try {
+    return await invoke('debug:startTest', projectId, testId, { name, breakpoints: activeMap(), breakOnExceptions: opts().breakOnExceptions });
+  } catch (err) {
+    errorToast(`Cannot debug '${name || testId}'`, err);
+    return null;
+  }
+}
+
 export function canDebugConfig(cfg) {
   if (!cfg) return false;
   if (cfg.custom) return /^(python|python3|node|dotnet|npm|pnpm|yarn)\b/.test((cfg.commandLine || '').trim());

@@ -14,6 +14,9 @@ const { DapSession } = require('./dap-session');
 const { NodeSession } = require('./node-session');
 
 const DEFAULT_EXCEPTIONS = { python: ['uncaught'], dotnet: ['user-unhandled'], node: ['uncaught'] };
+const RUNTIME = { 'dotnet-test': 'dotnet' };
+// netcoredbg warns about every Release-built test platform assembly it loads.
+const ADAPTER_NOISE = /^You are debugging a Release build of (testhost|Microsoft\.TestPlatform|Microsoft\.VisualStudio\.TestPlatform)/;
 
 function cleanEnv(env) {
   const out = {};
@@ -78,6 +81,12 @@ class DebugService {
     return this.launch(spec, path.basename(file), { ...opts, file });
   }
 
+  /** Debug one test (Tests tool window, gutter icon); see TestService.debugSpec. */
+  async startTest(projectId, testId, opts = {}) {
+    const spec = this.ctx.tests.debugSpec(projectId, testId);
+    return this.launch(spec, opts.name || testId.split(/::|\./).pop(), { ...opts, test: { projectId, testId } });
+  }
+
   async restart() {
     if (!this.last) throw new Error('Nothing to restart.');
     const { spec, name, opts } = this.last;
@@ -90,8 +99,9 @@ class DebugService {
     if (opts.breakOnExceptions != null) this.breakOnExceptions = !!opts.breakOnExceptions;
     this.last = { spec, name, opts: { ...opts, breakpoints: undefined } };
     const id = `debug-${++this.seq}`;
-    this.current = { id, name, kind: spec.kind, state: 'starting', configId: opts.configId || null, file: opts.file || null };
-    this.emit('state', { state: 'starting', name, kind: spec.kind, configId: this.current.configId });
+    const kind = RUNTIME[spec.kind] || spec.kind;
+    this.current = { id, name, kind, state: 'starting', configId: opts.configId || null, file: opts.file || null };
+    this.emit('state', { state: 'starting', name, kind, configId: this.current.configId });
     let session;
     try {
       session = await this.createSession(spec, name);
@@ -101,11 +111,11 @@ class DebugService {
       }
       this.session = session;
       this.wire(session, id);
-      const filters = this.breakOnExceptions ? DEFAULT_EXCEPTIONS[spec.kind] : [];
+      const filters = this.breakOnExceptions ? DEFAULT_EXCEPTIONS[kind] : [];
       await session.start({ breakpoints: this.breakpoints, exceptionFilters: filters, stopOnEntry: !!opts.stopOnEntry });
       if (this.current && this.current.id === id && this.current.state === 'starting') {
         this.current.state = 'running';
-        this.emit('state', { state: 'running', name, kind: spec.kind });
+        this.emit('state', { state: 'running', name, kind });
       }
       return { sessionId: id };
     } catch (err) {
@@ -122,7 +132,7 @@ class DebugService {
 
   wire(session, id) {
     const mine = () => this.current && this.current.id === id;
-    session.on('output', (o) => mine() && this.emit('output', { category: o.category, text: o.text }));
+    session.on('output', (o) => mine() && !ADAPTER_NOISE.test(o.text) && this.emit('output', { category: o.category, text: o.text }));
     session.on('breakpoint', (b) => mine() && this.emit('breakpoint', { ...b, file: this.mapPath(b.file) }));
     session.on('continued', (c) => {
       if (!mine()) return;
@@ -199,6 +209,7 @@ class DebugService {
       this.log(`\x1b[90m${target}\x1b[0m\n`);
       return new DapSession({ command: exe, args: ['--interpreter=vscode'], env: cleanEnv({ ...process.env, DOTNET_ROOT: env.DOTNET_ROOT || path.dirname(fs.realpathSync(dotnet)) }), cwd: spec.cwd, adapterID: 'coreclr', launchArgs: { type: 'coreclr', name, program: target, args: spec.args, cwd: spec.cwd, env: appEnv, justMyCode: true, enableStepFiltering: true } });
     }
+    if (spec.kind === 'dotnet-test') return this.dotnetTestSession(spec, name);
     if (spec.kind === 'node') {
       const env = cleanEnv({ ...process.env, ...this.dotEnvFor([this.ctx.root, spec.cwd]), ...(spec.env || {}) });
       delete env.NODE_OPTIONS;
@@ -207,6 +218,44 @@ class DebugService {
       return new NodeSession({ node, program: spec.program, args: spec.args, runtimeArgs: spec.runtimeArgs || [], cwd: spec.cwd, env });
     }
     throw new Error(`Cannot debug ${spec.kind} programs.`);
+  }
+
+  /**
+   * `dotnet test` (which builds first) with VSTEST_HOST_DEBUG: the test host prints its process id and
+   * waits for a debugger, and netcoredbg attaches to it. The test run's output goes to the Debug console.
+   */
+  async dotnetTestSession(spec, name) {
+    const log = (t) => this.log(t);
+    const exe = await adapters.ensureNetcoredbg(log);
+    const dotnet = settings.get().dotnet.path || which('dotnet') || 'dotnet';
+    const env = cleanEnv(dotnetAuth({ ...process.env, DOTNET_NOLOGO: '1', DOTNET_CLI_TELEMETRY_OPTOUT: '1', MSBUILDTERMINALLOGGER: 'off', VSTEST_HOST_DEBUG: '1' }, spec.cwd).env);
+    this.log(`\x1b[90m${path.basename(dotnet)} test ${path.basename(spec.project)} --filter ${spec.filter}\x1b[0m\n`);
+    let text = '';
+    let gotPid;
+    const pid = new Promise((resolve) => (gotPid = resolve));
+    const proc = stream(dotnet, ['test', spec.project, '-nologo', '--filter', spec.filter], {
+      cwd: spec.cwd,
+      env,
+      onData: (t) => {
+        text += t;
+        const m = /Process Id:\s*(\d+)/.exec(text);
+        if (m) gotPid(+m[1]);
+        // The attach instructions are for people attaching by hand.
+        log(t.replace(/^.*(Host debugging is enabled|Process Id: \d+|Waiting for debugger attach).*\r?\n?/gm, ''));
+      },
+    });
+    this.building = proc;
+    const ended = proc.done.then((code) => {
+      throw new Error(code === -2 ? 'Cancelled.' : /error|failed/i.test(text) && !/Process Id/.test(text) ? 'The test project did not build; fix the errors above and debug again.' : 'dotnet test ended before the test host started; see the output above.');
+    });
+    ended.catch(() => {});
+    const processId = await Promise.race([pid, ended]);
+    this.building = null;
+    this.testHost = proc;
+    proc.done.then(() => {
+      if (this.testHost === proc) this.testHost = null;
+    });
+    return new DapSession({ command: exe, args: ['--interpreter=vscode'], env: cleanEnv({ ...process.env, DOTNET_ROOT: env.DOTNET_ROOT || path.dirname(fs.realpathSync(dotnet)) }), cwd: spec.cwd, adapterID: 'coreclr', request: 'attach', launchArgs: { type: 'coreclr', name, processId, justMyCode: true, enableStepFiltering: true } });
   }
 
   async dotnetTargetPath(dotnet, project, env) {
@@ -329,6 +378,7 @@ class DebugService {
       return;
     }
     await s.stop();
+    if (this.testHost) this.testHost.kill();
   }
 
   dispose() {

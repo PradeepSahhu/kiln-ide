@@ -107,6 +107,23 @@ async function applyRefactoring() {
   await waitFor(async () => !(await win.$(sel('refactor-dialog'))), { timeout: 30000, message: 'refactoring applied' });
 }
 
+/** Click a test's gutter icon in the active editor and choose Run / Debug / Run with Coverage. */
+async function gutterTest(line, label) {
+  const glyph = await waitFor(async () => {
+    const y = await kiln('lineY', line);
+    if (y == null) return null;
+    for (const g of await win.$$('.test-glyph')) {
+      const box = await g.boundingBox();
+      if (box && y >= box.y - 1 && y <= box.y + box.height + 1) return g;
+    }
+    return null;
+  }, { message: `test icon on line ${line}` });
+  await glyph.click();
+  await win.click(sel('menu-item', `[data-label^="${label}"]`));
+}
+
+const outcome = (name) => win.getAttribute(sel('test-row', `[data-name="${name}"]`), 'data-outcome').catch(() => null);
+
 before(async () => {
   app = await electron.launch({ args: [APP], cwd: APP, env: { ...process.env, KILN_USER_DATA: userData, KILN_E2E: '1', KILN_AGENT_HOME: agentHome, KILN_TOOLS_DIR: toolsDir }, timeout: 90000 });
   win = await app.firstWindow();
@@ -114,11 +131,14 @@ before(async () => {
   await win.waitForSelector(sel('welcome'), { timeout: 60000 });
 });
 
-// A dialog left open by an earlier test would block this one: report it.
+// A dialog left open by an earlier (failed) test would block this one: report it and close it, so
+// one failure does not cascade into the tests after it.
 beforeEach(async (t) => {
   if (!win) return;
   const open = await win.evaluate(() => (window.__kiln ? window.__kiln.store.get().modals.map((m) => m.type) : [])).catch(() => []);
-  if (open.length) console.log(`  [open dialogs before "${t.name}": ${open.join(', ')}]`);
+  if (!open.length) return;
+  console.log(`  [open dialogs before "${t.name}": ${open.join(', ')} - closed]`);
+  await win.evaluate(() => window.__kiln.closeAllModals()).catch(() => {});
 });
 
 after(async () => {
@@ -353,6 +373,52 @@ test('merge conflicts: the Conflicts dialog, accept a side, resolve per conflict
   await win.waitForSelector(sel('conflicts-finish'), { timeout: 20000 });
   await win.click(sel('conflicts-finish'));
   await waitFor(() => /Merge branch 'feature-rates'/.test(git(dir, 'log', '-1', '--format=%s')), { message: 'merge committed' });
+});
+
+test('tests (pytest): gutter icons run and debug a test, rerun failed, coverage marks the lines that ran', { timeout: 400000 }, async () => {
+  const dir = path.join(workspace, 'e2e_py');
+  const testFile = path.join(dir, 'tests', 'test_calc.py');
+  fs.writeFileSync(path.join(dir, 'calc.py'), 'def add(a, b):\n    return a + b\n\n\ndef unused():\n    return 0\n');
+  fs.writeFileSync(testFile, 'from calc import add\n\n\ndef test_add():\n    total = add(1, 2)\n    assert total == 4\n');
+  await run('view.tests');
+  await win.waitForSelector(sel('test-project', '[data-kind="python"]'), { timeout: 60000 });
+  await win.waitForSelector(sel('test-row', '[data-name="test_add"]'), { timeout: 60000 });
+
+  // Gutter icon: Run, and the result shows on the icon and in the Tests window.
+  await kiln('openFile', testFile, 4, 1);
+  await gutterTest(4, "Run 'test_add'");
+  await waitFor(async () => (await outcome('test_add')) === 'failed', { timeout: 120000, message: 'test_add failed' });
+  await win.waitForSelector('.test-glyph.failed');
+  await shot('19-tests-failed');
+
+  // Fix it; Rerun Failed runs only the failed test.
+  fs.writeFileSync(testFile, 'from calc import add\n\n\ndef test_add():\n    total = add(1, 2)\n    assert total == 3\n');
+  await win.click(sel('tests-rerun-failed'));
+  await waitFor(async () => (await outcome('test_add')) === 'passed', { timeout: 120000, message: 'test_add passes after the fix' });
+  assert.equal(await win.isDisabled(sel('tests-rerun-failed')), true, 'no failed tests left');
+
+  // Coverage: unused() never runs.
+  await win.click(sel('tests-run-coverage'));
+  await win.waitForSelector(sel('coverage-summary'), { timeout: 240000 });
+  const calc = path.join(dir, 'calc.py');
+  const pct = Number(await win.getAttribute(sel('coverage-row', `[data-path="${calc}"]`), 'data-percent'));
+  assert.ok(pct > 0 && pct < 100, `calc.py partly covered (${pct}%)`);
+  await kiln('openFile', calc, 1, 1);
+  await win.waitForSelector('.cov-hit');
+  await win.waitForSelector('.cov-miss');
+  await shot('20-coverage');
+  await win.click(sel('tests-toggle-coverage'));
+  await waitFor(async () => !(await win.$('.cov-miss')), { message: 'coverage hidden' });
+
+  // Debug Test stops at a breakpoint in the test.
+  await kiln('openFile', testFile, 5, 1);
+  await kiln('toggleBreakpoint', testFile, 5);
+  await gutterTest(4, "Debug 'test_add'");
+  await waitFor(async () => (await win.getAttribute(sel('debug-panel'), 'data-state').catch(() => null)) === 'stopped', { timeout: 180000, message: 'paused in test_add' });
+  assert.match(await win.textContent(sel('debug-frame')), /test_add/);
+  await win.click(sel('debug-resume'));
+  await waitFor(async () => (await win.getAttribute(sel('debug-panel'), 'data-state')) === 'terminated', { timeout: 60000, message: 'test finished' });
+  await kiln('toggleBreakpoint', testFile, 5);
 });
 
 test('creates a C# console project, builds it, runs it', { skip: !has('dotnet'), timeout: 500000 }, async () => {
@@ -670,6 +736,33 @@ test('refactor JavaScript: Refactor This lists what applies; introduce variable 
   await waitFor(() => /function total\(items, discount, currency\)/.test(fs.readFileSync(file, 'utf8')) && /total\(\[1, 2\], 1, 'EUR'\)/.test(fs.readFileSync(file, 'utf8')), { message: 'signature and call updated' });
 });
 
+test('tests (node:test): gutter icons, results, coverage and Debug Test in JavaScript', { timeout: 300000 }, async () => {
+  const dir = path.join(workspace, 'e2e-node');
+  const testFile = path.join(dir, 'test', 'price.test.js');
+  fs.writeFileSync(path.join(dir, 'tax.js'), "'use strict';\n\nfunction withTax(x) {\n  if (x < 0) {\n    throw new Error('negative');\n  }\n  return x * 1.2;\n}\n\nmodule.exports = { withTax };\n");
+  fs.writeFileSync(testFile, "'use strict';\nconst { describe, test } = require('node:test');\nconst assert = require('node:assert/strict');\nconst { withTax } = require('../tax');\n\ndescribe('price', () => {\n  test('adds tax', () => {\n    const v = withTax(10);\n    assert.equal(v, 12);\n  });\n});\n");
+  await run('view.tests');
+  await win.waitForSelector(sel('test-project', '[data-kind="node"]'), { timeout: 60000 });
+  await kiln('openFile', testFile, 7, 1);
+  await gutterTest(7, "Run 'adds tax'");
+  await waitFor(async () => (await outcome('price adds tax')) === 'passed', { timeout: 120000, message: 'price adds tax passed' });
+  await win.waitForSelector('.test-glyph.passed');
+
+  await win.click(sel('tests-run-coverage'));
+  await waitFor(async () => !!(await win.$(sel('coverage-row', `[data-path="${path.join(dir, 'tax.js')}"]`))), { timeout: 120000, message: 'tax.js coverage' });
+  await kiln('openFile', path.join(dir, 'tax.js'), 1, 1);
+  await win.waitForSelector('.cov-miss');
+
+  await kiln('openFile', testFile, 8, 1);
+  await kiln('toggleBreakpoint', testFile, 8);
+  await gutterTest(7, "Debug 'adds tax'");
+  await waitFor(async () => (await win.getAttribute(sel('debug-panel'), 'data-state').catch(() => null)) === 'stopped', { timeout: 120000, message: 'paused in the JavaScript test' });
+  assert.match(await win.textContent(sel('debug-frame')), /price\.test\.js:8/);
+  await win.click(sel('debug-resume'));
+  await waitFor(async () => (await win.getAttribute(sel('debug-panel'), 'data-state')) === 'terminated', { timeout: 60000, message: 'test finished' });
+  await kiln('toggleBreakpoint', testFile, 8);
+});
+
 test('Claude edits a file and the IDE shows it live', { skip: process.env.KILN_E2E_SKIP_CLAUDE === '1', timeout: 240000 }, async () => {
   const dir = path.join(workspace, 'e2e-node');
   await run('view.claude');
@@ -682,4 +775,39 @@ test('Claude edits a file and the IDE shows it live', { skip: process.env.KILN_E
   await waitFor(async () => (await win.$$(sel('tool-card'))).length > 0, { message: 'tool call shown in chat' });
   await win.waitForSelector(sel('editor-tab', '[data-name="claude_e2e.txt"]'), { timeout: 30000 });
   await shot('13-claude');
+});
+
+test('tests (.NET xUnit): Debug Test attaches to the test host and stops in the test; coverage from coverlet', { skip: !has('dotnet'), timeout: 900000 }, async () => {
+  const { dir } = await createProject('dotnet-classlib-tests', 'E2eLib');
+  await waitBuild('success');
+  const find = (d, name) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isFile() && e.name === name) return p;
+      if (e.isDirectory() && !/^(bin|obj|\.git)$/.test(e.name)) {
+        const f = find(p, name);
+        if (f) return f;
+      }
+    }
+    return null;
+  };
+  const testFile = find(dir, 'CalculatorTests.cs');
+  fs.writeFileSync(testFile, 'namespace E2eLib.Tests;\n\npublic class CalculatorTests\n{\n    [Fact]\n    public void Add_ReturnsSum()\n    {\n        var sum = Calculator.Add(2, 3);\n        Assert.Equal(5, sum);\n    }\n}\n');
+  await run('view.tests');
+  await win.waitForSelector(sel('test-project', '[data-kind="dotnet"]'), { timeout: 60000 });
+  await kiln('openFile', testFile, 8, 1);
+  await kiln('toggleBreakpoint', testFile, 8);
+  await gutterTest(6, "Debug 'Add_ReturnsSum'");
+  await waitFor(async () => (await win.getAttribute(sel('debug-panel'), 'data-state').catch(() => null)) === 'stopped', { timeout: 400000, message: 'paused in the xUnit test' });
+  assert.match(await win.textContent(sel('debug-frame')), /Add_ReturnsSum/);
+  await shot('21-debug-dotnet-test');
+  await win.click(sel('debug-resume'));
+  await waitFor(async () => (await win.getAttribute(sel('debug-panel'), 'data-state')) === 'terminated', { timeout: 120000, message: 'test host finished' });
+  await kiln('toggleBreakpoint', testFile, 8);
+
+  await run('view.tests');
+  await win.click(sel('tests-run-coverage'));
+  const calc = find(dir, 'Calculator.cs');
+  await waitFor(async () => Number(await win.getAttribute(sel('coverage-row', `[data-path="${calc}"]`), 'data-percent').catch(() => -1)) === 100, { timeout: 400000, message: 'Calculator.cs covered (coverlet)' });
+  await waitFor(async () => (await outcome('E2eLib.Tests.CalculatorTests.Add_ReturnsSum')) === 'passed', { message: 'xUnit test passed' });
 });

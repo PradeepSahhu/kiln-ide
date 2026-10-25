@@ -130,7 +130,7 @@ export async function initEditor(container, diffContainer) {
     const d = docs.get(path);
     const test = d && d.tests && d.tests.find((t) => t.line === line);
     const el = e.target.element;
-    if (test && el && el.classList && el.classList.contains('test-glyph')) emit('runTest', { file: path, test });
+    if (test && el && el.classList && el.classList.contains('test-glyph')) emit('runTest', { file: path, test, x: e.event.posx, y: e.event.posy });
     else emit('gutterClick', { file: path, line, alt: e.event.altKey, shift: e.event.shiftKey });
   });
   editor.onContextMenu((e) => {
@@ -718,12 +718,26 @@ export function lane(name) {
 
 // ------------------------------------------------------------ test glyphs
 
-function scanTests(path) {
+// JavaScript / TypeScript test files (the main process finds test() / it() inside describe()).
+const JS_TEST_FILE = /(?:\.(?:test|spec)\.[cm]?[jt]sx?|(?:^|\/)(?:test|tests|__tests__)\/.+\.[cm]?[jt]sx?)$/;
+let testStatusOf = () => null;
+
+/** The tests service tells the editor each test's last result ('passed' | 'failed' | null). */
+export function setTestStatusProvider(fn) {
+  testStatusOf = fn;
+}
+
+export const testsIn = (path) => {
+  const d = docs.get(path);
+  return (d && d.tests) || [];
+};
+
+async function scanTests(path) {
   const d = docs.get(path);
   if (!d || !d.model) return;
   const lang = d.model.getLanguageId();
   const lines = d.model.getLinesContent();
-  const tests = [];
+  let tests = [];
   if (lang === 'csharp') {
     let cls = '';
     let ns = '';
@@ -749,13 +763,42 @@ function scanTests(path) {
       const m = /^(\s*)(?:async\s+)?def\s+(test\w*)\s*\(/.exec(l);
       if (m) tests.push({ line: i + 1, name: m[2], cls: m[1] ? cls : null, kind: 'python' });
     });
+  } else if (/^(javascript|typescript)$/.test(lang) && JS_TEST_FILE.test(relPath(path))) {
+    const version = d.model.getVersionId();
+    const found = await invoke('tests:scan', path, d.model.getValue()).catch(() => []);
+    if (d.model.isDisposed() || d.model.getVersionId() !== version) return;
+    tests = found.map((t) => ({ line: t.line, name: t.name, title: t.title, kind: 'node' }));
   }
   d.tests = tests;
-  d.decorations.tests = d.model.deltaDecorations(d.decorations.tests || [], tests.map((t) => ({ range: new monaco.Range(t.line, 1, t.line, 1), options: { glyphMarginClassName: `test-glyph ${t.status === 'failed' ? 'failed' : ''}`, glyphMarginHoverMessage: { value: `Run ${t.name}` }, glyphMargin: lane('Right') } })));
+  renderTestGlyphs(path);
+}
+
+export function renderTestGlyphs(path) {
+  const d = docs.get(path);
+  if (!d || !d.model || d.model.isDisposed() || !d.tests) return;
+  d.decorations.tests = d.model.deltaDecorations(
+    d.decorations.tests || [],
+    d.tests.map((t) => {
+      const status = testStatusOf(path, t);
+      return { range: new monaco.Range(t.line, 1, t.line, 1), options: { glyphMarginClassName: `test-glyph${status ? ` ${status}` : ''}`, glyphMarginHoverMessage: { value: `Run / Debug ${t.title || t.name}${status ? ` (last run: ${status})` : ''}` }, glyphMargin: lane('Right') } };
+    }),
+  );
 }
 
 export function rescanTests(path) {
   scanTests(path);
+}
+
+// --------------------------------------------------------------- coverage
+
+/** Covered / uncovered line marks from the last run with coverage ({ covered, uncovered } or null). */
+export function setCoverage(path, cov) {
+  const d = docs.get(path);
+  if (!d || !d.model || d.model.isDisposed()) return;
+  const n = d.model.getLineCount();
+  const mark = (line, hit) => ({ range: new monaco.Range(line, 1, line, 1), options: { isWholeLine: true, className: hit ? 'cov-hit-line' : 'cov-miss-line', linesDecorationsClassName: hit ? 'cov-hit' : 'cov-miss', overviewRuler: { color: hit ? '#5FB86555' : '#D9706B99', position: monaco.editor.OverviewRulerLane.Right } } });
+  const decs = cov ? [...cov.covered.filter((l) => l <= n).map((l) => mark(l, true)), ...cov.uncovered.filter((l) => l <= n).map((l) => mark(l, false))] : [];
+  d.decorations.cov = d.model.deltaDecorations(d.decorations.cov || [], decs);
 }
 
 // --------------------------------------------------------------- LSP sync

@@ -189,6 +189,11 @@ function buildMenuTemplate({ recent = [], send, keymap = {} }) {
         c('Mute Breakpoints', 'debug.muteBreakpoints'),
         { type: 'separator' },
         c('Run All Tests', 'tests.runAll'),
+        c('Run All Tests with Coverage', 'tests.runAllCoverage'),
+        c('Rerun Failed Tests', 'tests.rerunFailed'),
+        c('Run Test at Caret', 'tests.runAtCaret'),
+        c('Debug Test at Caret', 'tests.debugAtCaret'),
+        c('Show / Hide Coverage', 'tests.toggleCoverage'),
       ],
     },
     {

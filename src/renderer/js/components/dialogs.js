@@ -1,5 +1,5 @@
 // Modal dialogs and pickers.
-import { html, useEffect, useMemo, useRef, useState, createContext, useContext } from '../lib/preact.js';
+import { html, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from '../lib/preact.js';
 import { useStore, store } from '../lib/store.js';
 import { Icon, FileIcon, KindIcon } from '../lib/icons.js';
 import { invoke, on, isMac } from '../lib/ipc.js';
@@ -26,7 +26,8 @@ export function Modal({ title, children, footer, wide, testid, onClose, classNam
   const closeRef = useRef(close);
   closeRef.current = close;
   const boxRef = useRef(null);
-  useEffect(() => {
+  // A layout effect: Escape pressed right after the dialog appears must close it.
+  useLayoutEffect(() => {
     const k = (e) => {
       if (e.key !== 'Escape' || !layerRef.current.top || e.defaultPrevented) return;
       e.preventDefault();
