@@ -479,6 +479,89 @@ test('split editor: split right and down, the same file in both splits, drag tab
   assert.ok(await win.$(sel('editor-tab', '[data-name="calc.py"]')) && (await win.$(sel('editor-tab', '[data-name="main.py"]'))), 'every tab is in the remaining split');
 });
 
+test('git: commit individual lines; log actions - tag, cherry-pick, revert, interactive rebase, reset', { timeout: 240000 }, async () => {
+  const dir = path.join(workspace, 'e2e_py');
+  const g = (...a) => git(dir, '-c', 'user.email=t@example.com', '-c', 'user.name=Test', ...a);
+  const subject = (rev = 'HEAD') => git(dir, 'log', '-1', '--format=%s', rev).trim();
+  const logMenu = async (subj, label) => {
+    const row = sel('log-row', `[data-subject=${JSON.stringify(subj)}]`);
+    await waitFor(async () => !!(await win.$(row)), { timeout: 20000, message: `log shows "${subj}"` });
+    await win.click(row, { button: 'right' });
+    await win.click(sel('menu-item', `[data-label^="${label}"]`));
+  };
+
+  // Commit only one of two changes in a file.
+  const file = path.join(dir, 'lines.txt');
+  fs.writeFileSync(file, 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n');
+  g('add', 'lines.txt');
+  g('commit', '-q', '-m', 'lines');
+  fs.writeFileSync(file, 'ONE\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\neleven\n');
+  await run('view.commit');
+  await win.click(sel('commit-tab'));
+  await win.waitForSelector(sel('change-row', '[data-path="lines.txt"]'), { timeout: 30000 });
+  await win.click(sel('change-row', '[data-path="lines.txt"] [data-testid="change-lines-toggle"]'));
+  await waitFor(async () => (await win.$$(sel('change-lines', '[data-path="lines.txt"] [data-testid="hunk"]'))).length === 2, { message: 'two hunks' });
+  await win.uncheck(sel('change-lines', '[data-path="lines.txt"] [data-testid="hunk"]:nth-child(1) [data-testid="hunk-check"]'));
+  await waitFor(async () => (await win.getAttribute(sel('change-row', '[data-path="lines.txt"]'), 'data-partial')) === 'true', { message: 'lines.txt partly selected' });
+  await shot('23-commit-lines');
+  const others = await win.$$eval(sel('change-row'), (els) => els.map((e) => e.dataset.path).filter((p) => p !== 'lines.txt'));
+  for (const p of others) await win.uncheck(sel('change-row', `[data-path="${p}"] input[type="checkbox"]`));
+  await win.fill(sel('commit-message'), 'add eleven only');
+  await win.click(sel('commit-button'));
+  await waitFor(() => subject() === 'add eleven only', { message: 'line commit' });
+  assert.equal(git(dir, 'show', 'HEAD:lines.txt'), 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\neleven\n', 'only the second change is committed');
+  assert.match(fs.readFileSync(file, 'utf8'), /^ONE\n/, 'the other change is still in the working tree');
+  fs.writeFileSync(file, git(dir, 'show', 'HEAD:lines.txt'));
+
+  // Log: New Tag on a commit.
+  await run('view.git');
+  await win.waitForSelector(sel('git-panel'));
+  await logMenu('add eleven only', 'New Tag');
+  await win.fill(sel('tag-name'), 'e2e-tag');
+  await win.click(sel('dialog-confirm'));
+  await waitFor(() => git(dir, 'tag', '-l', 'e2e-tag').trim() === 'e2e-tag', { message: 'tag created' });
+
+  // Cherry-pick a commit from another branch, then revert it.
+  g('checkout', '-q', '-b', 'pick-src');
+  fs.writeFileSync(path.join(dir, 'picked.txt'), 'picked\n');
+  g('add', 'picked.txt');
+  g('commit', '-q', '-m', 'commit to pick');
+  g('checkout', '-q', 'main');
+  await win.click(sel('git-branch-row', '[data-branch="pick-src"]'));
+  await logMenu('commit to pick', 'Cherry-Pick');
+  await waitFor(() => subject() === 'commit to pick', { message: 'cherry-picked onto main' });
+  await win.click(sel('git-branches', ' .list-row:first-child'));
+  await logMenu('commit to pick', 'Revert Commit');
+  await waitFor(() => subject() === 'Revert "commit to pick"', { message: 'reverted' });
+  assert.ok(!fs.existsSync(path.join(dir, 'picked.txt')));
+
+  // Interactive rebase: squash the second commit into the first, drop the third.
+  for (const n of ['r1', 'r2', 'r3']) {
+    fs.writeFileSync(path.join(dir, `${n}.txt`), `${n}\n`);
+    g('add', `${n}.txt`);
+    g('commit', '-q', '-m', `rebase ${n}`);
+  }
+  await logMenu('rebase r1', 'Interactively Rebase from Here');
+  await win.waitForSelector(sel('rebase-dialog'));
+  assert.deepEqual(await win.$$eval(sel('rebase-row'), (els) => els.map((e) => e.dataset.subject)), ['rebase r1', 'rebase r2', 'rebase r3'], 'oldest first');
+  await win.selectOption(sel('rebase-action-1'), 'squash');
+  await win.selectOption(sel('rebase-action-2'), 'drop');
+  await shot('24-interactive-rebase');
+  await win.click(sel('rebase-start'));
+  await waitFor(() => /^rebase r1\n\nrebase r2$/.test(git(dir, 'log', '-1', '--format=%B').trim()), { message: 'squashed' });
+  assert.ok(fs.existsSync(path.join(dir, 'r2.txt')) && !fs.existsSync(path.join(dir, 'r3.txt')), 'r3 dropped');
+
+  // Reset (mixed) to the revert: the squashed commit's changes stay as local changes.
+  const before = git(dir, 'rev-parse', 'HEAD~1').trim();
+  await logMenu('Revert "commit to pick"', 'Reset Current Branch to Here');
+  await win.waitForSelector(sel('reset-dialog'));
+  await win.click(sel('reset-mode-mixed'));
+  await win.click(sel('reset-confirm'));
+  await waitFor(() => git(dir, 'rev-parse', 'HEAD').trim() === before, { message: 'reset' });
+  assert.ok(fs.existsSync(path.join(dir, 'r1.txt')), 'mixed reset keeps the files');
+  assert.match(git(dir, 'status', '--porcelain'), /\?\? r1\.txt/);
+});
+
 test('creates a C# console project, builds it, runs it', { skip: !has('dotnet'), timeout: 500000 }, async () => {
   const { dir } = await createProject('dotnet-console', 'E2eCs');
   await waitBuild('success');

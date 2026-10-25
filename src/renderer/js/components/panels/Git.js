@@ -24,13 +24,39 @@ export async function showFileDiff(spec, title) {
   }
 }
 
-function ChangeRow({ f, checked, onCheck, selected, onSelect, onOpen, onMenu, testid = 'change-row', stats }) {
-  return html`<div class=${cls('change-row', `k-${f.kind}`, selected && 'selected')} data-testid=${testid} data-path=${f.path} onClick=${onSelect} onDblClick=${onOpen} onContextMenu=${onMenu} title=${`${f.path}${f.origPath ? ` (renamed from ${f.origPath})` : ''}`}>
-    ${onCheck ? html`<input type="checkbox" checked=${checked} onClick=${(e) => e.stopPropagation()} onChange=${(e) => onCheck(e.target.checked)} />` : null}
+function ChangeRow({ f, checked, partial, onCheck, selected, onSelect, onOpen, onMenu, testid = 'change-row', stats, expanded, onToggleLines }) {
+  return html`<div class=${cls('change-row', `k-${f.kind}`, selected && 'selected')} data-testid=${testid} data-path=${f.path} data-partial=${partial ? 'true' : undefined} onClick=${onSelect} onDblClick=${onOpen} onContextMenu=${onMenu} title=${`${f.path}${f.origPath ? ` (renamed from ${f.origPath})` : ''}`}>
+    ${onToggleLines ? html`<span class="lines-toggle" data-testid="change-lines-toggle" title=${expanded ? 'Hide changed lines' : 'Choose the lines to commit'} onClick=${(e) => { e.stopPropagation(); onToggleLines(); }}><${Icon} name=${expanded ? 'chevronDown' : 'chevronRight'} size=${12} /></span>` : null}
+    ${onCheck ? html`<input type="checkbox" checked=${checked} ref=${(el) => { if (el) el.indeterminate = !!partial; }} onClick=${(e) => e.stopPropagation()} onChange=${(e) => onCheck(e.target.checked)} />` : null}
     <${FileIcon} name=${basename(f.path)} />
     <span class="name">${basename(f.path)}</span>
     <span class="dir">${dirname(f.path) === '/' || !f.path.includes('/') ? '' : dirname(f.path)}</span>
     <span class="stats">${stats || (f.added != null ? html`<span class="a">+${f.added}</span><span class="d">−${f.deleted}</span>` : null)}<span class="muted">${KIND_LETTER[f.kind] || ''}</span></span>
+  </div>`;
+}
+
+/** The changed lines of a file, each with a checkbox: commit only some of a file's changes. */
+function ChangedLines({ data, ids, onChange }) {
+  if (!data) return html`<div class="change-lines"><${Spinner} /></div>`;
+  if (data.binary) return html`<div class="change-lines muted">Binary file: it is committed whole.</div>`;
+  const toggle = (list, on) => {
+    const next = new Set(ids);
+    for (const id of list) on ? next.add(id) : next.delete(id);
+    onChange(next);
+  };
+  return html`<div class="change-lines" data-testid="change-lines" data-path=${data.path}>
+    ${data.hunks.map((h) => {
+      const changed = h.lines.filter((l) => l.id).map((l) => l.id);
+      const all = changed.every((id) => ids.has(id));
+      const some = changed.some((id) => ids.has(id));
+      return html`<div class="change-hunk" data-testid="hunk">
+        <div class="hunk-head"><input type="checkbox" data-testid="hunk-check" checked=${all} ref=${(el) => { if (el) el.indeterminate = some && !all; }} onChange=${(e) => toggle(changed, e.target.checked)} />@@ -${h.oldStart} +${h.newStart}</div>
+        ${h.lines.map((l) => (l.id
+          ? html`<div class=${cls('change-line', l.type)}><input type="checkbox" data-testid="line-check" data-line=${l.id} checked=${ids.has(l.id)} onChange=${(e) => toggle([l.id], e.target.checked)} /><span>${l.type === 'add' ? '+' : '−'}</span><span class="txt">${l.text}</span></div>`
+          : html`<div class="change-line ctx"><span class="txt">${l.text}</span></div>`))}
+      </div>`;
+    })}
+    ${!data.hunks.length ? html`<div class="muted">No changed lines.</div>` : null}
   </div>`;
 }
 
@@ -42,7 +68,40 @@ function CommitTab() {
   const [message, setMessage] = useState('');
   const [amend, setAmend] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Line selections: path -> { data (hunks), ids (selected line ids), all (every changed line id) }.
+  const [lines, setLines] = useState({});
+  const [expanded, setExpanded] = useState(() => new Set());
   const files = (status && status.files) || [];
+  const loadLines = async (p, keep) => {
+    const data = await invoke('git:fileHunks', p).catch(() => null);
+    if (!data) return;
+    const all = new Set(data.hunks.flatMap((h) => h.lines.filter((l) => l.id).map((l) => l.id)));
+    setLines((cur) => {
+      const old = keep && cur[p];
+      const ids = old ? new Set([...old.ids].filter((id) => all.has(id))) : new Set(checked.has(p) ? all : []);
+      return { ...cur, [p]: { data, ids, all } };
+    });
+  };
+  const toggleLines = (p) => {
+    const next = new Set(expanded);
+    if (next.has(p)) next.delete(p);
+    else {
+      next.add(p);
+      if (!lines[p]) loadLines(p);
+    }
+    setExpanded(next);
+  };
+  const setLineIds = (p, ids) => {
+    setLines((cur) => ({ ...cur, [p]: { ...cur[p], ids } }));
+    const n = new Set(checked);
+    if (ids.size) n.add(p);
+    else n.delete(p);
+    setChecked(n);
+  };
+  const partialOf = (p) => {
+    const l = lines[p];
+    return !!(l && checked.has(p) && l.ids.size && l.ids.size < l.all.size);
+  };
   // Newly appearing changes start checked (Rider's default change list behaviour).
   useEffect(() => {
     const nextKnown = new Set(files.map((f) => f.path));
@@ -50,6 +109,9 @@ function CommitTab() {
     for (const f of files) if (!known.has(f.path)) nextChecked.add(f.path);
     setChecked(nextChecked);
     setKnown(nextKnown);
+    // Files changed: refresh the lines shown, keeping the selection of lines that are still there.
+    setLines((cur) => Object.fromEntries(Object.entries(cur).filter(([p]) => nextKnown.has(p))));
+    for (const p of expanded) if (nextKnown.has(p)) loadLines(p, true);
   }, [status]);
   useEffect(() => {
     if (amend && !message) invoke('git:lastCommitMessage').then(setMessage);
@@ -61,16 +123,25 @@ function CommitTab() {
     const n = new Set(checked);
     for (const f of list) on ? n.add(f.path) : n.delete(f.path);
     setChecked(n);
+    setLines((cur) => {
+      const next = { ...cur };
+      for (const f of list) if (next[f.path]) next[f.path] = { ...next[f.path], ids: new Set(on ? next[f.path].all : []) };
+      return next;
+    });
   };
   const doCommit = async (andPush) => {
     if (!message.trim()) return toast({ kind: 'warning', title: 'Enter a commit message' });
     if (!selectedFiles.length && !amend) return toast({ kind: 'warning', title: 'Select files to commit' });
     setBusy(true);
     await ed.saveAll({ quiet: true });
-    const r = await invoke('git:commit', { message, files: selectedFiles, amend });
+    const partial = {};
+    for (const f of selectedFiles) if (partialOf(f.path)) partial[f.path] = { ids: [...lines[f.path].ids], hash: lines[f.path].data.hash };
+    const r = await invoke('git:commit', { message, files: selectedFiles, amend, lines: partial });
     setBusy(false);
     if (!r.ok) return errorToast('Commit failed', new Error(r.error));
     toast({ kind: 'success', title: `Committed ${r.hash}`, message: message.split('\n')[0], timeout: 3500 });
+    setLines({});
+    setExpanded(new Set());
     setMessage('');
     setAmend(false);
     await git.refreshAll();
@@ -100,7 +171,10 @@ function CommitTab() {
       ? html`<div class="list-group" onClick=${() => toggleAll(list, !list.every((f) => checked.has(f.path)))}>
             <input type="checkbox" checked=${list.every((f) => checked.has(f.path))} onClick=${(e) => e.stopPropagation()} onChange=${(e) => toggleAll(list, e.target.checked)} />${title}<span class="badge">${list.length}</span>
           </div>
-          ${list.map((f) => html`<${ChangeRow} f=${f} checked=${checked.has(f.path)} selected=${sel === f.path} onSelect=${() => setSel(f.path)} onCheck=${(on) => { const n = new Set(checked); on ? n.add(f.path) : n.delete(f.path); setChecked(n); }} onOpen=${() => (f.kind === 'conflict' ? openMerge(f.path) : showFileDiff({ kind: 'working', path: f.path, origPath: f.origPath }))} onMenu=${(e) => fileMenu(e, f)} />`)}`
+          ${list.map((f) => html`<${ChangeRow} f=${f} checked=${checked.has(f.path)} partial=${partialOf(f.path)} selected=${sel === f.path} onSelect=${() => setSel(f.path)}
+              expanded=${expanded.has(f.path)} onToggleLines=${f.kind === 'conflict' || f.kind === 'renamed' || f.kind === 'deleted' ? null : () => toggleLines(f.path)}
+              onCheck=${(on) => toggleAll([f], on)} onOpen=${() => (f.kind === 'conflict' ? openMerge(f.path) : showFileDiff({ kind: 'working', path: f.path, origPath: f.origPath }))} onMenu=${(e) => fileMenu(e, f)} />
+            ${expanded.has(f.path) ? html`<${ChangedLines} data=${lines[f.path] && lines[f.path].data} ids=${(lines[f.path] && lines[f.path].ids) || new Set()} onChange=${(ids) => setLineIds(f.path, ids)} />` : null}`)}`
       : null;
   return html`<div class="commit-panel">
     ${status && (status.merging || status.rebasing || status.cherryPicking) ? html`<div class="repo-banner"><${Icon} name="warning" className="sev-warning" />${status.merging ? 'Merging' : status.rebasing ? 'Rebasing' : 'Cherry-picking'} — resolve conflicts, then commit.<div class="spacer"></div><button class="btn small primary" data-testid="resolve-conflicts" onClick=${() => showConflicts()}>Resolve…</button><button class="btn small" onClick=${async () => { await invoke('git:abort'); git.refreshAll(); }}>Abort</button></div>` : null}
@@ -307,6 +381,26 @@ function RefLabels({ refs }) {
   });
 }
 
+/** Actions on a commit in the log (Rider's Git log context menu). */
+function commitMenu(e, c) {
+  const head = (store.get().git.status || {}).branch || {};
+  const isHead = head.oid === c.hash;
+  const tags = c.refs.filter((r) => r.startsWith('tag: ')).map((r) => r.slice(5));
+  showContextMenu(e, [
+    { label: 'Copy Revision Number', icon: 'copy', run: () => navigator.clipboard.writeText(c.hash) },
+    { separator: true },
+    { label: 'Cherry-Pick', icon: 'commit', disabled: isHead, run: () => git.cherryPick(c) },
+    { label: 'Revert Commit', icon: 'refresh', run: () => git.revertCommit(c) },
+    { label: 'Reset Current Branch to Here…', icon: 'arrowLeft', disabled: isHead, run: () => git.resetTo(c) },
+    { label: 'Interactively Rebase from Here…', icon: 'branch', run: () => git.interactiveRebase(c) },
+    { separator: true },
+    { label: 'New Branch…', icon: 'branch', run: () => git.newBranchAt(c) },
+    { label: 'New Tag…', icon: 'bookmark', run: () => git.newTag(c) },
+    ...tags.map((t) => ({ label: `Delete Tag '${t}'`, icon: 'trash', danger: true, run: () => git.deleteTag(t) })),
+    { label: 'Checkout Revision', run: () => git.checkout(c.hash) },
+  ]);
+}
+
 function LogTab() {
   const branches = useStore((s) => s.git.branches);
   const tick = useStore((s) => s.git.tick);
@@ -350,7 +444,7 @@ function LogTab() {
     <div class="git-log">
       <div class="tw-toolbar"><input class="input" style="height:24px;width:260px" placeholder="Text or hash" value=${q} onInput=${(e) => setQ(e.target.value)} /><div class="spacer"></div><span class="muted" style="font-size:12px">${commits.length} commits</span></div>
       <${VirtualList} items=${commits} rowHeight=${26} testid="git-log"
-        render=${(c, i, style) => html`<div key=${c.hash} class=${cls('log-row', sel === c.hash && 'selected')} style=${style} onClick=${() => setSel(c.hash)} title=${c.hash}>
+        render=${(c, i, style) => html`<div key=${c.hash} class=${cls('log-row', sel === c.hash && 'selected')} style=${style} data-testid="log-row" data-hash=${c.hash} data-subject=${c.subject} onClick=${() => setSel(c.hash)} onContextMenu=${(e) => { setSel(c.hash); commitMenu(e, c); }} title=${c.hash}>
           <${GraphCell} g=${graph.rows[i]} width=${gw} />
           <span class="subject"><${RefLabels} refs=${c.refs} />${c.subject}</span>
           <span class="author">${c.author}</span>

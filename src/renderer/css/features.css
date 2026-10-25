@@ -477,3 +477,29 @@
 .merge-result { flex: 1; min-height: 120px; }
 .conflict-row { gap: 8px; }
 .conflict-row .nm { white-space: nowrap; }
+
+/* Git: reset dialog, interactive rebase, committing individual lines */
+.reset-modes { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.reset-mode { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border-inner); border-radius: 6px; cursor: pointer; }
+.reset-mode.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.reset-mode .nm { font-weight: 600; }
+.reset-mode .muted { font-size: 12px; }
+.rebase-list { border: 1px solid var(--border-inner); border-radius: 6px; max-height: 360px; overflow: auto; }
+.rebase-row { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; cursor: pointer; }
+.rebase-row:hover { background: var(--bg-hover); }
+.rebase-row.selected { background: var(--bg-selection); }
+.rebase-row select { height: 24px; width: 108px; flex: none; }
+.rebase-row .when { font-size: 12px; white-space: nowrap; }
+.rebase-row.a-drop .subj { text-decoration: line-through; opacity: .6; }
+.rebase-row.a-squash .subj, .rebase-row.a-fixup .subj { padding-left: 14px; }
+.change-lines { padding: 2px 6px 6px 30px; font-family: var(--font-mono, 'JetBrains Mono', monospace); font-size: 11.5px; }
+.change-hunk { border: 1px solid var(--border-inner); border-radius: 4px; margin-top: 4px; overflow: hidden; }
+.change-hunk .hunk-head { display: flex; align-items: center; gap: 6px; padding: 2px 6px; background: var(--bg-hover); color: var(--text-secondary); }
+.change-line { display: flex; align-items: center; gap: 4px; white-space: pre; min-height: 18px; padding-right: 6px; }
+.change-line input { margin: 0 4px; }
+.change-line.add { background: color-mix(in srgb, var(--success) 12%, transparent); }
+.change-line.del { background: color-mix(in srgb, var(--error) 12%, transparent); }
+.change-line.ctx { color: var(--text-secondary); padding-left: 22px; }
+.change-line .txt { overflow: hidden; text-overflow: ellipsis; }
+.change-row .lines-toggle { opacity: .6; }
+.change-row .lines-toggle:hover { opacity: 1; }

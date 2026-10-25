@@ -73,6 +73,12 @@ Claude built in. Built on Electron, Monaco, xterm.js and the Claude Agent SDK.
   dialog lists every conflicted file (accept yours / theirs, or Merge). The merge view shows each conflict
   with yours, the common base and theirs side by side - Accept Yours / Theirs / Both / Base per conflict or
   for all - over an editable Result; Apply marks the file resolved, then Commit Merge / Continue Rebase.
+- **Git log actions** (right-click a commit): Cherry-Pick, Revert Commit, Reset Current Branch to Here (soft /
+  mixed / hard / keep), Interactively Rebase from Here (reorder, reword, squash, fixup, drop; local changes are
+  stashed and re-applied), New Branch, New Tag (lightweight or annotated), Delete Tag, Checkout Revision.
+  Cherry-picks, reverts and rebases that stop on conflicts open the Conflicts dialog.
+- **Commit individual lines**: expand a changed file in the Commit window and tick the hunks or single lines to
+  commit; the rest stays in the working tree. Other staged files are left alone.
 - Commit tool window with partial commits, stashes (create, inspect, apply, pop, drop), branch changes against
   a base branch, diff viewer, blame, Git log and console.
 
@@ -161,8 +167,8 @@ KILN_E2E_SKIP_CLAUDE=1 npm run test:e2e   # skip the test that sends one small p
 The end-to-end suite creates Python (venv), C# and JavaScript projects and checks auto-build, problems, run
 configurations, the terminal, commits, branch deletion, stashes, merge conflict resolution, branch changes and diffs, Go to Declaration,
 Find Usages, refactorings in Python, C# (including Roslyn through csharp-ls) and JavaScript, running and
-debugging tests from the gutter with coverage (pytest, node:test, xUnit), split editors and pinned tabs, the
-knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
+debugging tests from the gutter with coverage (pytest, node:test, xUnit), split editors and pinned tabs, committing
+individual lines and the Git log actions (tag, cherry-pick, revert, interactive rebase, reset), the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
 keymap customization, Search Everywhere, Local History, skills and the knowledge-graph MCP server, installing
 the knowledge graph for agents (into a scratch home folder), the GitHub connection, and a live Claude edit. Screenshots go to
 `$TMPDIR/kiln-e2e-shots`.

@@ -272,6 +272,14 @@ function register({ getContext, createWindow, rebuildMenu, broadcast }) {
   g('log', (ctx, opts) => ctx.git.log(opts));
   g('commitDetails', (ctx, hash) => ctx.git.commitDetails(hash));
   g('lastCommitMessage', (ctx) => ctx.git.lastCommitMessage());
+  g('fileHunks', (ctx, rel) => ctx.git.fileHunks(rel));
+  g('cherryPick', (ctx, hash) => ctx.git.cherryPick(hash));
+  g('revertCommit', (ctx, hash) => ctx.git.revertCommit(hash));
+  g('reset', (ctx, hash, mode) => ctx.git.reset(hash, mode));
+  g('createTag', (ctx, name, hash, message) => ctx.git.createTag(name, hash, message));
+  g('deleteTag', (ctx, name) => ctx.git.deleteTag(name));
+  g('rebasePlan', (ctx, hash) => ctx.git.rebasePlan(hash));
+  g('interactiveRebase', (ctx, plan) => ctx.git.interactiveRebase(plan));
   g('stage', (ctx, paths) => ctx.git.stage(paths));
   g('unstage', (ctx, paths) => ctx.git.unstage(paths));
   g('rollback', (ctx, files) => ctx.git.rollback(files));

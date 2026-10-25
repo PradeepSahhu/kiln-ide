@@ -23,6 +23,7 @@ import * as refactor from './services/refactor.js';
 import * as tests from './services/tests.js';
 import './components/RefactorDialog.js';
 import './components/ConflictsDialog.js';
+import './components/GitDialogs.js';
 import { showConflicts } from './services/conflicts.js';
 import { initProject, openProject, closeProject, newFileIn } from './services/project.js';
 

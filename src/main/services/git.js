@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { run } = require('../util/proc');
 const github = require('./github');
+const lineDiff = require('./line-diff');
+const crypto = require('crypto');
 
 const US = '\x1f'; // unit separator between fields
 const RS = '\x1e'; // record separator between entries
@@ -65,6 +67,11 @@ function parseTrack(track) {
   return { ahead: ahead ? +ahead[1] : 0, behind: behind ? +behind[1] : 0, gone: /gone/.test(track || '') };
 }
 
+/** Identifies a version of a file (line selections belong to one version). */
+function hashText(text) {
+  return crypto.createHash('sha1').update(text || '').digest('hex').slice(0, 16);
+}
+
 class GitService {
   constructor(ctx) {
     this.ctx = ctx;
@@ -76,11 +83,12 @@ class GitService {
     return { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'en_US.UTF-8', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' };
   }
 
-  async raw(args, { cwd = this.root, input, encoding, timeout, quiet = false } = {}) {
+  async raw(args, { cwd = this.root, input, encoding, timeout, quiet = false, env: extraEnv } = {}) {
     const full = ['-c', 'core.quotepath=off', '-c', 'color.ui=false', ...args];
     const sub0 = args.find((a) => !a.startsWith('-'));
     // Commands that talk to a remote get the GitHub connection (gh login or token).
-    const env = NETWORK.has(sub0) ? await github.gitEnv(this.env()) : this.env();
+    const base = extraEnv ? { ...this.env(), ...extraEnv } : this.env();
+    const env = NETWORK.has(sub0) ? await github.gitEnv(base) : base;
     const res = await run('git', full, { cwd, input, encoding, timeout, env });
     const sub = args.find((a) => !a.startsWith('-'));
     if (!quiet && (LOGGED.has(sub) || (res.code !== 0 && sub !== 'show' && sub !== 'rev-parse' && sub !== 'show-ref'))) {
@@ -596,12 +604,27 @@ class GitService {
   }
 
   /**
+   * The changed lines of a file (HEAD -> working tree) as hunks with line ids, for committing some of
+   * them. `hash` identifies the working version the ids belong to.
+   */
+  async fileHunks(rel) {
+    this.require();
+    const hasHead = (await this.raw(['rev-parse', '--verify', '-q', 'HEAD'], { quiet: true })).code === 0;
+    const [before, after] = await Promise.all([hasHead ? this.show('HEAD', rel) : { text: '', missing: true }, this.working(rel)]);
+    if (before.binary || after.binary) return { path: rel, binary: true, hunks: [] };
+    return { path: rel, hash: hashText(after.text), hunks: lineDiff.hunks(before.missing ? '' : before.text, after.missing ? '' : after.text) };
+  }
+
+  /**
    * Commit the selected files (Rider's change-list model: every checked file is committed with its
    * working-tree content, regardless of what is staged). Unchecked files stay as local changes.
+   * `lines` ({ path: { ids, hash } }) commits only those changed lines of a file; the rest of its
+   * changes stay in the working tree.
    */
-  async commit({ message, files, amend = false }) {
+  async commit({ message, files, amend = false, lines = {} }) {
     this.require();
     if (!message || !message.trim()) return { ok: false, error: 'Commit message is empty.' };
+    if (Object.keys(lines).length) return this.commitLines({ message, files, amend, lines });
     const untracked = files.filter((f) => f.kind === 'untracked').map((f) => f.path);
     if (untracked.length) await this.ok(['add', '--', ...untracked]);
     const paths = [];
@@ -616,6 +639,162 @@ class GitService {
     if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout).trim() };
     const hash = (await this.raw(['rev-parse', '--short', 'HEAD'])).stdout.trim();
     return { ok: true, hash, output: r.stdout.trim() };
+  }
+
+  /**
+   * A commit built in a temporary index: HEAD, plus whole files, plus the selected lines of the others.
+   * The real index and the working tree are not touched except that committed paths are refreshed
+   * from the new HEAD, so the uncommitted lines show as local changes.
+   */
+  async commitLines({ message, files, amend, lines }) {
+    const hasHead = (await this.raw(['rev-parse', '--verify', '-q', 'HEAD'], { quiet: true })).code === 0;
+    const os = require('os');
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kiln-index-'));
+    const env = { GIT_INDEX_FILE: path.join(dir, 'index') };
+    try {
+      if (hasHead) await this.ok(['read-tree', 'HEAD'], { env });
+      const paths = [];
+      for (const f of files) {
+        const sel = lines[f.path];
+        paths.push(f.path);
+        if (f.origPath) paths.push(f.origPath);
+        if (!sel) {
+          // The whole file, as in the working tree (deleted files are removed).
+          if (f.origPath) await this.raw(['rm', '-q', '--cached', '--ignore-unmatch', '--', f.origPath], { env });
+          const exists = fs.existsSync(path.join(this.root, f.path));
+          await this.ok(exists ? ['add', '-f', '--', f.path] : ['rm', '-q', '--cached', '--ignore-unmatch', '--', f.path], { env });
+          continue;
+        }
+        const before = hasHead ? await this.show('HEAD', f.path) : { text: '', missing: true };
+        const after = await this.working(f.path);
+        if (before.binary || after.binary) throw new Error(`${f.path} is binary; commit it whole.`);
+        if (sel.hash && sel.hash !== hashText(after.text)) throw new Error(`${f.path} changed since its lines were selected; select them again.`);
+        const content = lineDiff.applySelection(before.missing ? '' : before.text, after.missing ? '' : after.text, sel.ids || []);
+        if (!content && before.missing) continue; // a new file with no line selected stays uncommitted
+        const blob = (await this.ok(['hash-object', '-w', '--stdin'], { input: content })).trim();
+        const mode = (await this.raw(['ls-files', '-s', '--', f.path], { env, quiet: true })).stdout.split(' ')[0] || (await this.fileMode(f.path));
+        await this.ok(['update-index', '--add', '--cacheinfo', `${mode},${blob},${f.path}`], { env });
+      }
+      const args = ['commit', '-F', '-'];
+      if (amend) args.push('--amend');
+      const r = await this.raw(args, { input: message, env });
+      if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout).trim() };
+      // Committed paths now match HEAD in the real index; what was not committed stays a local change.
+      const tracked = [];
+      for (const p of paths) if ((await this.raw(['ls-tree', '--name-only', 'HEAD', '--', p], { quiet: true })).stdout.trim() || (await this.raw(['ls-files', '--', p], { quiet: true })).stdout.trim()) tracked.push(p);
+      if (tracked.length) await this.raw(['reset', '-q', 'HEAD', '--', ...tracked]);
+      const hash = (await this.raw(['rev-parse', '--short', 'HEAD'])).stdout.trim();
+      return { ok: true, hash, output: r.stdout.trim() };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    } finally {
+      fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  async fileMode(rel) {
+    try {
+      return (fs.statSync(path.join(this.root, rel)).mode & 0o111) ? '100755' : '100644';
+    } catch {
+      return '100644';
+    }
+  }
+
+  // ------------------------------------------------------- log actions
+
+  async parentsOf(hash) {
+    const r = await this.raw(['rev-list', '--parents', '-n', '1', hash], { quiet: true });
+    return r.stdout.trim().split(' ').slice(1);
+  }
+
+  /** Cherry-pick a commit onto the current branch (merge commits against their first parent). */
+  async cherryPick(hash) {
+    this.require();
+    const args = ['cherry-pick'];
+    if ((await this.parentsOf(hash)).length > 1) args.push('-m', '1');
+    const r = await this.raw([...args, hash]);
+    return r.code === 0 ? { ok: true, output: r.stdout.trim() } : { ok: false, error: (r.stdout + '\n' + r.stderr).trim(), conflicts: this.repoState().cherryPicking };
+  }
+
+  /** Revert a commit with a new commit. */
+  async revertCommit(hash) {
+    this.require();
+    const args = ['revert', '--no-edit'];
+    if ((await this.parentsOf(hash)).length > 1) args.push('-m', '1');
+    const r = await this.raw([...args, hash]);
+    return r.code === 0 ? { ok: true, output: r.stdout.trim() } : { ok: false, error: (r.stdout + '\n' + r.stderr).trim(), conflicts: this.repoState().reverting };
+  }
+
+  /** Reset the current branch to a commit: soft, mixed, hard or keep (git reset --<mode>). */
+  async reset(hash, mode = 'mixed') {
+    this.require();
+    if (!['soft', 'mixed', 'hard', 'keep'].includes(mode)) throw new Error(`Unknown reset mode ${mode}`);
+    const r = await this.raw(['reset', `--${mode}`, hash]);
+    return r.code === 0 ? { ok: true } : { ok: false, error: (r.stderr || r.stdout).trim() };
+  }
+
+  /** A tag on a commit; with a message it is an annotated tag. */
+  async createTag(name, hash, message = '') {
+    this.require();
+    const args = message ? ['tag', '-a', name, '-F', '-', hash] : ['tag', name, hash];
+    const r = await this.raw(args, { input: message || undefined });
+    return r.code === 0 ? { ok: true } : { ok: false, error: (r.stderr || r.stdout).trim() };
+  }
+
+  async deleteTag(name) {
+    this.require();
+    const r = await this.raw(['tag', '-d', name]);
+    return r.code === 0 ? { ok: true } : { ok: false, error: (r.stderr || r.stdout).trim() };
+  }
+
+  /**
+   * The commits an interactive rebase from `hash` would replay, oldest first: everything after
+   * `hash` up to HEAD (from the root when `hash` is the first commit and `includeBase`).
+   */
+  async rebasePlan(hash) {
+    this.require();
+    const parents = await this.parentsOf(hash);
+    const fmt = ['%H', '%P', '%an', '%at', '%s', '%B'].join('%x1f') + '%x1e';
+    const range = parents.length ? `${parents[0]}..HEAD` : 'HEAD';
+    const r = await this.ok(['log', '--reverse', `--format=${fmt}`, range]);
+    const commits = r.split(RS).map((x) => x.replace(/^\n/, '')).filter(Boolean).map((rec) => {
+      const [h, p, author, at, subject, body] = rec.split(US);
+      return { hash: h, short: h.slice(0, 8), parents: p ? p.split(' ') : [], author, date: +at * 1000, subject, message: (body || '').trim() };
+    });
+    return { base: parents[0] || null, root: !parents.length, commits, merges: commits.filter((c) => c.parents.length > 1).length };
+  }
+
+  /**
+   * Interactive rebase with a plan from the IDE: steps [{ hash, action: pick|reword|squash|fixup|drop,
+   * message }] oldest first, in the new order. Reworded messages are applied with `exec git commit
+   * --amend`; squashes keep both messages. Local changes are stashed and re-applied (--autostash).
+   */
+  async interactiveRebase({ base, root = false, steps }) {
+    this.require();
+    if (!steps || !steps.length) return { ok: false, error: 'Nothing to rebase.' };
+    if (steps[0].action === 'squash' || steps[0].action === 'fixup') return { ok: false, error: 'The first commit cannot be squashed or fixed up into a previous one.' };
+    const os = require('os');
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kiln-rebase-'));
+    const quote = (p) => `'${p.replace(/'/g, "'\\''")}'`;
+    const todo = [];
+    steps.forEach((st, i) => {
+      const act = st.action === 'reword' ? 'pick' : st.action;
+      if (!['pick', 'squash', 'fixup', 'drop'].includes(act)) throw new Error(`Unknown rebase action ${st.action}`);
+      todo.push(`${act} ${st.hash}`);
+      if (st.action === 'reword' && st.message && st.message.trim()) {
+        const file = path.join(dir, `message-${i}.txt`);
+        fs.writeFileSync(file, st.message.trim() + '\n');
+        todo.push(`exec git commit --amend --no-verify --allow-empty -F ${quote(file)}`);
+      }
+    });
+    const todoFile = path.join(dir, 'todo');
+    fs.writeFileSync(todoFile, todo.join('\n') + '\n');
+    const env = { GIT_SEQUENCE_EDITOR: `cp ${quote(todoFile)}`, GIT_EDITOR: 'true' };
+    const args = ['rebase', '-i', '--autostash', root ? '--root' : base];
+    const r = await this.raw(args, { env });
+    // Messages may still be needed by exec steps of a rebase that stopped on a conflict.
+    if (r.code === 0) fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    return r.code === 0 ? { ok: true, output: (r.stdout + r.stderr).trim() } : { ok: false, error: (r.stdout + '\n' + r.stderr).trim(), conflicts: this.repoState().rebasing };
   }
 
   // ----------------------------------------------------------------- stash

@@ -2,7 +2,7 @@
 import { store } from '../lib/store.js';
 import { checkConflicts } from './conflicts.js';
 import { invoke, on } from '../lib/ipc.js';
-import { toast, confirm, prompt, errorToast } from '../lib/ui.js';
+import { toast, confirm, prompt, errorToast, openModal } from '../lib/ui.js';
 import { debounce } from '../lib/util.js';
 import * as ed from './editor.js';
 
@@ -158,4 +158,74 @@ export async function initRepo() {
   store.update('project', { git: info });
   await refreshAll();
   toast({ title: 'Git repository created' });
+}
+
+// ------------------------------------------------------------ log actions
+
+/** Run an operation that may stop on conflicts (cherry-pick, revert, rebase): report and show them. */
+async function operation(title, promise, done) {
+  await ed.saveAll({ quiet: true });
+  const r = await promise;
+  if (r.ok) toast({ kind: 'success', title: done, timeout: 3500 });
+  else if (r.conflicts) toast({ kind: 'warning', title: `${title} stopped on conflicts`, message: 'Resolve them, then continue.', timeout: 6000 });
+  else errorToast(`${title} failed`, new Error(r.error));
+  await refreshAll();
+  if (!r.ok && r.conflicts) await checkConflicts();
+  return r;
+}
+
+const short = (c) => `${c.hash.slice(0, 8)} ${c.subject ? `"${c.subject.length > 50 ? `${c.subject.slice(0, 50)}…` : c.subject}"` : ''}`.trim();
+
+export function cherryPick(c) {
+  return operation('Cherry-pick', invoke('git:cherryPick', c.hash), `Cherry-picked ${short(c)}`);
+}
+
+export async function revertCommit(c) {
+  return operation('Revert', invoke('git:revertCommit', c.hash), `Reverted ${short(c)}`);
+}
+
+export async function resetTo(c) {
+  const mode = await openModal('gitReset', { commit: c, branch: (store.get().git.status || {}).branch ? store.get().git.status.branch.head : null });
+  if (!mode) return null;
+  await ed.saveAll({ quiet: true });
+  const r = await invoke('git:reset', c.hash, mode);
+  if (r.ok) toast({ kind: 'success', title: `Reset to ${c.hash.slice(0, 8)} (${mode})`, timeout: 3500 });
+  else errorToast('Reset failed', new Error(r.error));
+  await refreshAll();
+  ed.refreshHeads();
+  return r;
+}
+
+export async function newBranchAt(c) {
+  return newBranch(c.hash);
+}
+
+export async function newTag(c) {
+  const r = await prompt({ title: 'Create Tag', label: `Tag name (on ${c.hash.slice(0, 8)}):`, placeholder: 'v1.0.0', ok: 'Create', testid: 'tag-name', checkbox: { label: 'Annotated, with the commit subject as its message', value: false } });
+  if (!r) return null;
+  const name = (typeof r === 'string' ? r : r.value).trim();
+  if (!name) return null;
+  const res = await invoke('git:createTag', name, c.hash, typeof r === 'object' && r.checked ? c.subject || name : '');
+  if (res.ok) toast({ title: `Created tag ${name}`, timeout: 2500 });
+  else errorToast('Could not create the tag', new Error(res.error));
+  await refreshAll();
+  return res;
+}
+
+export async function deleteTag(name) {
+  if (!(await confirm({ title: 'Delete Tag', message: `Delete tag '${name}'?`, ok: 'Delete', danger: true }))) return null;
+  const r = await invoke('git:deleteTag', name);
+  if (!r.ok) errorToast('Could not delete the tag', new Error(r.error));
+  await refreshAll();
+  return r;
+}
+
+export async function interactiveRebase(c) {
+  const plan = await invoke('git:rebasePlan', c.hash).catch((err) => ({ error: err.message }));
+  if (plan.error) return errorToast('Cannot rebase from here', new Error(plan.error));
+  if (!plan.commits.length) return toast({ title: 'Nothing to rebase', message: 'There are no commits after this one on the current branch.', timeout: 3000 });
+  if (plan.merges) return toast({ kind: 'warning', title: 'Merge commits in the range', message: 'Interactive rebase from here would flatten merge commits; choose a commit after the last merge.', timeout: 6000 });
+  const steps = await openModal('interactiveRebase', { plan, from: c });
+  if (!steps) return null;
+  return operation('Rebase', invoke('git:interactiveRebase', { base: plan.base, root: plan.root, steps }), 'Rebased');
 }
