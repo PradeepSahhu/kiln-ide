@@ -106,3 +106,5 @@
 .statusbar .progress.indeterminate > div { width: 30%; animation: indet 1.2s ease-in-out infinite; }
 @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 .zen .stripe, .zen .tool-window, .zen .splitter { display: none !important; }
+/* A panel's ToolWindow fills the slot App.js gives it (both carry .tool-window). */
+.tool-window > .tool-window { flex: 1; min-height: 0; min-width: 0; border: none; }

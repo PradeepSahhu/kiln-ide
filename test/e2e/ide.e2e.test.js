@@ -171,6 +171,15 @@ test('terminal runs commands in the project', { timeout: 60000 }, async () => {
   await waitFor(async () => (await kiln('terminalText')).length > 0, { message: 'shell prompt' });
   await kiln('terminalSend', 'echo kiln-$((40+2))\r');
   await waitFor(async () => (await kiln('terminalText')).includes('kiln-42'), { message: 'terminal output' });
+  // The terminal fills its tool window: the panel inside the slot used to collapse to its content, so
+  // xterm (which sizes itself to its container) got 0 px and showed nothing although commands ran.
+  const size = await win.evaluate(() => {
+    const slot = document.querySelector('.tool-window.bottom').getBoundingClientRect().height;
+    const screen = document.querySelector('[data-testid="terminal-panel"] .xterm-screen');
+    return { slot, screen: screen ? screen.getBoundingClientRect().height : 0 };
+  });
+  assert.ok(size.screen > 100 && size.screen >= size.slot - 90, `terminal is ${size.screen}px tall in a ${size.slot}px tool window`);
+  await shot('05-terminal');
 });
 
 test('commit tool window commits the checked files', { timeout: 60000 }, async () => {
