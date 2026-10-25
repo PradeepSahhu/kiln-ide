@@ -10,7 +10,7 @@ import { openTool } from './layout.js';
 // Must match TOKEN_TYPES / TOKEN_MODIFIERS in src/main/services/codeindex/worker.js
 const TOKEN_TYPES = ['namespace', 'class', 'interface', 'struct', 'enum', 'typeParameter', 'parameter', 'local', 'field', 'property', 'enumMember', 'event', 'function', 'method', 'decorator', 'constant', 'builtin', 'selfKeyword', 'module', 'record', 'delegate', 'attribute'];
 const TOKEN_MODIFIERS = ['declaration', 'static', 'readonly'];
-const INDEX_LANGS = ['csharp', 'python', 'javascript', 'typescript'];
+const INDEX_LANGS = ['csharp', 'python', 'javascript', 'typescript', 'go', 'java', 'rust', 'c', 'cpp', 'ruby', 'php', 'shell'];
 const LSP_LANGS = ['csharp', 'python'];
 
 let monaco = null;

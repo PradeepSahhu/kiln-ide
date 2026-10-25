@@ -7,7 +7,7 @@ const { APP_ROOT } = require('../../protocol');
 const { graphFileName } = require('./graph');
 
 const WASM_DIR = path.join(APP_ROOT, 'node_modules', '@vscode', 'tree-sitter-wasm', 'wasm').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
-const INDEXABLE = /\.(cs|py|pyi|ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i;
+const INDEXABLE = /\.(cs|py|pyi|ts|tsx|mts|cts|js|jsx|mjs|cjs|go|java|rs|c|h|cc|cpp|cxx|hpp|hh|hxx|rb|php|sh|bash)$/i;
 
 function graphFileFor(root) {
   return path.join(app.getPath('userData'), 'knowledge', graphFileName(root));
@@ -25,7 +25,7 @@ class CodeIndex {
 
   ensureWorker() {
     if (this.worker) return this.worker;
-    const w = new Worker(path.join(__dirname, 'worker.js'), { workerData: { wasmDir: WASM_DIR, graphFile: this.root ? graphFileFor(this.root) : null } });
+    const w = new Worker(path.join(__dirname, 'worker.js').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`), { workerData: { wasmDir: WASM_DIR, graphFile: this.root ? graphFileFor(this.root) : null } });
     this.worker = w;
     // Every handler checks it still belongs to the current worker: after a project switch the previous
     // worker saves and exits in the background and must not touch the new one's state.

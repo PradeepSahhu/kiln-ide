@@ -10,7 +10,9 @@
     "test": "node --test --test-concurrency=4 \"test/unit/*.test.js\"",
     "test:e2e": "KILN_E2E=1 node --test --test-concurrency=1 --test-timeout=3600000 \"test/e2e/*.test.js\"",
     "test:all": "npm test && npm run test:e2e",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "dist": "electron-builder --mac --arm64",
+    "dist:dir": "electron-builder --mac --arm64 --dir"
   },
   "author": "Pradeep Sahu",
   "license": "MIT",
@@ -36,6 +38,49 @@
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",
     "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "playwright-core": "^1.64.1"
+  },
+  "build": {
+    "appId": "dev.kiln.ide",
+    "productName": "Kiln IDE",
+    "copyright": "Copyright \u00a9 2026 Pradeep Sahu",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "package.json",
+      "src/**/*",
+      "resources/**/*",
+      "!**/.DS_Store",
+      "!test/**",
+      "!docs/**",
+      "!scripts/**"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "src/agent-tools/**",
+      "src/main/services/codeindex/**",
+      "resources/**",
+      "node_modules/node-pty/**",
+      "node_modules/@vscode/tree-sitter-wasm/**",
+      "node_modules/pyright/**",
+      "node_modules/@anthropic-ai/claude-agent-sdk/**",
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+    ],
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null,
+      "hardenedRuntime": false,
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "title": "Kiln IDE"
+    }
   }
 }

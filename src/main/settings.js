@@ -55,6 +55,7 @@ const DEFAULTS = {
   },
   agents: { kgInClaudeChat: true, kgPromptDismissed: false },
   github: { auth: 'auto', tokenVar: '' },
+  knowledgeGraph: { fetchMinutes: 10 },
   keymapPreset: 'rider',
   keymap: {},
   customThemes: [],

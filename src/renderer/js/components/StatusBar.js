@@ -10,6 +10,7 @@ import { Spinner } from './ui.js';
 export function StatusBar() {
   const build = useStore((s) => ({ running: s.build.running, status: s.build.status, errors: s.build.errors, warnings: s.build.warnings, steps: s.build.steps, durationMs: s.build.durationMs }));
   const index = useStore((s) => s.index);
+  const bg = useStore((s) => s.branchGraph);
   const lsp = useStore((s) => s.lsp);
   const cursor = useStore((s) => s.editor.cursor);
   const meta = useStore((s) => ({ eol: s.editor.eol, encoding: s.editor.encoding, language: s.editor.language, hasFile: !!s.editor.tabs.find((t) => t.id === s.editor.active && t.kind === 'file') }));
@@ -33,6 +34,11 @@ export function StatusBar() {
         ? html`<span class="item" data-testid="build-status-bar" onClick=${() => openTool('bottom', 'build')}>${build.status === 'success' ? html`<${Icon} name="success" size=${13} className="ok" />Build succeeded` : build.status === 'failed' ? html`<${Icon} name="error" size=${13} className="sev-error" />Build failed` : html`<${Icon} name="info" size=${13} />Build ${build.status}`}${build.durationMs ? html`<span class="dim">${formatDuration(build.durationMs)}</span>` : null}</span>`
         : null}
     ${index && index.state === 'indexing' ? html`<span class="item" title="Building the code index and knowledge graph"><${Spinner} size=${12} />Indexing${index.total ? ` ${index.done}/${index.total}` : '…'}</span>` : null}
+    ${bg && (bg.state === 'ready' || bg.state === 'syncing')
+      ? html`<span class="item" data-testid="branch-graph-status" data-state=${bg.state} data-commit=${bg.commit || ''} onClick=${() => run('view.mainGraph')}
+          title=${`Knowledge graph of ${bg.ref || bg.branch}${bg.short ? ` at ${bg.short}` : ''}${bg.subject ? ` "${bg.subject}"` : ''}. Updates in the background whenever ${bg.branch} changes (commits, merges, pulls, fetched changes).`}>
+          ${bg.state === 'syncing' ? html`<${Spinner} size=${12} />` : html`<${Icon} name="graph" size=${12} className="muted" />`}${bg.branch}${bg.short ? html`<span class="dim">${bg.short}</span>` : null}</span>`
+      : null}
     ${lspItems.map(([lang, v]) => html`<span class="item" title=${v.message || ''}>${v.state === 'starting' || v.state === 'busy' ? html`<${Spinner} size=${12} />` : v.state === 'ready' ? html`<${Icon} name="dot" size=${10} className="ok" />` : html`<${Icon} name="dot" size=${10} className=${v.state === 'error' ? 'sev-error' : 'muted'} />`}${v.server || (lang === 'python' ? 'pyright' : 'csharp-ls')}${v.state === 'missing' ? ' (not installed)' : ''}</span>`)}
     <div class="spacer"></div>
     <span class="item" data-testid="problem-counts" onClick=${() => openTool('bottom', 'problems')} title="Problems">

@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 const APP_ROOT = path.resolve(__dirname, '../..');
 const G = require(path.join(APP_ROOT, 'src/main/services/codeindex/graph.js'));
 
-const INDEXABLE = /\.(cs|py|pyi|ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i;
+const INDEXABLE = /\.(cs|py|pyi|ts|tsx|mts|cts|js|jsx|mjs|cjs|go|java|rs|c|h|cc|cpp|cxx|hpp|hh|hxx|rb|php|sh|bash)$/i;
 const SKIP_DIRS = new Set(['node_modules', '.git', 'bin', 'obj', 'dist', 'build', 'out', '.venv', 'venv', 'env', '__pycache__', '.next', 'target', 'coverage', '.idea', '.vs', '.mypy_cache', '.pytest_cache', '.tox', '.gradle', 'vendor']);
 const MAX_FILE = 1.5 * 1024 * 1024;
 const MAX_FILES = 25000;
@@ -127,8 +127,61 @@ async function refresh(state, { force = false } = {}) {
 
 const cache = new Map(); // root -> { state, checkedAt }
 
+/**
+ * Graph of a git ref without checking it out: "main" (the main branch Kiln follows: main/master,
+ * or origin's when it is ahead) or any branch, tag or commit. Starts from the graph Kiln saved for
+ * that branch and brings it up to date from git objects.
+ */
+async function loadRef(start, ref, { maxAge = 0 } = {}) {
+  const GS = require(path.join(APP_ROOT, 'src/main/services/codeindex/git-sync.js'));
+  const found = findProject(start);
+  let root;
+  try {
+    root = found ? found.root : fs.realpathSync(path.resolve(start));
+  } catch {
+    throw new KgError(`${start} does not exist.`);
+  }
+  let target;
+  if (ref === 'main' || ref === 'master' || ref === 'default') {
+    const m = await GS.resolveMainRef(root);
+    if (!m) throw new KgError('This folder is not in a git repository with a main or master branch.');
+    target = { branch: m.branch, commit: m.commit, ref: m.ref };
+  } else {
+    let commit = null;
+    try {
+      commit = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+      commit = null;
+    }
+    if (!commit) throw new KgError(`Unknown git ref "${ref}".`);
+    target = { branch: ref, commit, ref };
+  }
+  const key = `${root}@${target.branch}`;
+  const hit = cache.get(key);
+  if (hit && hit.state.commit === target.commit && Date.now() - hit.checkedAt <= maxAge) return hit.state;
+  const A = await getAnalyzer();
+  let state = hit && hit.state;
+  if (!state) {
+    const file = path.join(userDataDir(), 'knowledge', G.graphFileName(root, target.branch));
+    try {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (data.version === A.VERSION) state = G.deserialize(data);
+    } catch {
+      state = null;
+    }
+    if (!state) state = G.createState(root);
+    state.root = root;
+  }
+  await GS.syncFromGit(state, { root, commit: target.commit, analyze: A.analyze, langOf: A.langOf });
+  state.ref = target.ref;
+  state.branch = target.branch;
+  cache.set(key, { state, checkedAt: Date.now() });
+  return state;
+}
+
 /** Load (and refresh) the graph of the project containing `start`. */
-async function load(start, { maxAge = 0 } = {}) {
+async function load(start, { maxAge = 0, ref = null } = {}) {
+  if (ref && ref !== 'working-tree' && ref !== 'worktree') return loadRef(start, ref, { maxAge });
   const found = findProject(start);
   if (!found) throw new KgError(`${path.resolve(start)} is not indexed by Kiln IDE. Open the folder in Kiln once, or run the "index" command (kg_index tool) to build its knowledge graph.`);
   const hit = cache.get(found.root);
@@ -285,8 +338,9 @@ async function run(command, args = {}, { cwd = process.cwd(), maxAge = 0 } = {})
   if (command === 'index') return indexFolder(args.project || cwd);
   const fn = queries[command];
   if (!fn) throw new KgError(`Unknown command "${command}". Commands: overview, search, symbol, usages, impact, path, file, variable, index.`);
-  const state = await load(args.project || cwd, { maxAge });
-  return { project: state.root, ...fn(state, args) };
+  const state = await load(args.project || cwd, { maxAge, ref: args.ref });
+  const ref = args.ref && args.ref !== 'working-tree' ? args.ref : 'working-tree';
+  return { project: state.root, ref, commit: state.commit || undefined, ...fn(state, args) };
 }
 
 module.exports = { run, load, indexFolder, findProject, graphFileFor, userDataDir, KgError, queries };

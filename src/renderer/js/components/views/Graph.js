@@ -460,11 +460,15 @@ export function KnowledgeGraphView({ tab }) {
   const [found, setFound] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showVars, setShowVars] = useState(true);
+  const bg = useStore((s) => s.branchGraph);
+  const mainReady = !!bg && bg.state === 'ready';
+  const [ref, setRef] = useState(tab.data && tab.data.ref === 'main' ? 'main' : 'work');
+  const src = ref === 'main' && mainReady ? 'main' : undefined;
   const load = async () => {
     setLoading(true);
     try {
       if (source === 'artifacts') setData(await invoke('kb:graph'));
-      else setData(await invoke('code:graph', { mode: mode === 'functions' ? 'all' : mode, focus, depth, limit: 2500, variables: showVars }));
+      else setData(await invoke('code:graph', { mode: mode === 'functions' ? 'all' : mode, focus, depth, limit: 2500, variables: showVars, source: src }));
     } catch (err) {
       setData({ nodes: [], edges: [], error: err.message });
     }
@@ -472,7 +476,7 @@ export function KnowledgeGraphView({ tab }) {
   };
   useEffect(() => {
     load();
-  }, [mode, focus, depth, source, showVars]);
+  }, [mode, focus, depth, source, showVars, src, src ? bg.commit : null]);
   useEffect(() => {
     if (source !== 'code') return undefined;
     const reload = debounce(load, 800);
@@ -481,11 +485,11 @@ export function KnowledgeGraphView({ tab }) {
   }, [mode, focus, depth]);
   useEffect(() => {
     if (!selected || source !== 'code') return setDetails(null);
-    invoke('code:neighbors', selected.id).then(setDetails).catch(() => setDetails(null));
+    invoke('code:neighbors', selected.id, src).then(setDetails).catch(() => setDetails(null));
   }, [selected && selected.id]);
   useEffect(() => {
     if (!q || source !== 'code') return setFound([]);
-    const t = setTimeout(() => invoke('code:findNodes', q).then(setFound).catch(() => setFound([])), 150);
+    const t = setTimeout(() => invoke('code:findNodes', q, src).then(setFound).catch(() => setFound([])), 150);
     return () => clearTimeout(t);
   }, [q]);
   const openNode = (n) => {
@@ -499,11 +503,14 @@ export function KnowledgeGraphView({ tab }) {
   };
   const nodeCount = data ? data.nodes.length : 0;
   const varList = (title, list) => (list && list.length ? html`<div class="section-title">${title} (${list.length})</div>${list.map((n) => html`<div class="list-row" data-testid="graph-var-link" onClick=${() => focusOn(n.id)}><${KindIcon} kind=${n.kind} /><span class="ellipsis">${n.container ? html`<span class="muted">${n.container.split('.').pop()}.</span>` : null}${n.label}</span><span class="muted" style="font-size:11px;margin-left:auto">${n.weight > 1 ? `×${n.weight}` : ''}</span></div>`)}` : null);
-  return html`<div class="graph-view" data-testid=${source === 'code' ? 'knowledge-graph' : 'artifact-graph'} data-node-count=${String(nodeCount)}>
+  return html`<div class="graph-view" data-testid=${source === 'code' ? 'knowledge-graph' : 'artifact-graph'} data-node-count=${String(nodeCount)} data-source=${src || 'work'}>
     <div class="graph-canvas">
       <div class="graph-toolbar">
         ${source === 'code'
-          ? html`<div class="seg">${[['files', 'Files'], ['functions', 'Functions'], ['focus', 'Focus']].map(([m, l]) => html`<button class=${cls(mode === m && 'on')} onClick=${() => setMode(m)} disabled=${m === 'focus' && !focus}>${l}</button>`)}</div>
+          ? html`${mainReady
+                ? html`<div class="seg" title=${`The ${bg.branch} graph follows ${bg.ref} in the background (now at ${bg.short || ''})`}><button class=${cls(ref === 'work' && 'on')} data-testid="graph-source-work" onClick=${() => setRef('work')}>Working tree</button><button class=${cls(ref === 'main' && 'on')} data-testid="graph-source-main" onClick=${() => setRef('main')}>${bg.branch}<span class="dim" style="margin-left:4px;font-size:11px">${bg.short || ''}</span></button></div>`
+                : null}
+              <div class="seg">${[['files', 'Files'], ['functions', 'Functions'], ['focus', 'Focus']].map(([m, l]) => html`<button class=${cls(mode === m && 'on')} onClick=${() => setMode(m)} disabled=${m === 'focus' && !focus}>${l}</button>`)}</div>
               ${mode === 'focus' ? html`<div class="seg">${[1, 2, 3].map((d) => html`<button class=${cls(depth === d && 'on')} onClick=${() => setDepth(d)}>${d} level${d > 1 ? 's' : ''}</button>`)}</div>` : null}
               ${mode !== 'files' ? html`<div class="seg"><button class=${cls(showVars && 'on')} data-testid="graph-variables" title="Show variables, fields and constants with the functions that read and write them" onClick=${() => setShowVars(!showVars)}>Variables</button></div>` : null}
               <div style="position:relative"><input class="input" style="width:240px" placeholder="Find a file, class, function or variable" value=${q} onInput=${(e) => setQ(e.target.value)} />

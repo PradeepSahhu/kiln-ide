@@ -445,6 +445,56 @@ test('GitHub connection works through the gh login or an access token', { timeou
   await win.keyboard.press('Escape');
 });
 
+test('importing a Go / Java / Rust / Ruby / PHP project builds its knowledge graph; the main-branch graph follows main', { timeout: 180000 }, async () => {
+  const dir = path.join(workspace, 'polyglot');
+  fs.mkdirSync(dir, { recursive: true });
+  const files = {
+    'cmd/server.go': 'package main\n\nvar requests int\n\nfunc handle() int {\n\trequests++\n\treturn requests\n}\n\nfunc main() { handle() }\n',
+    'src/App.java': 'public class App {\n  private int hits;\n  public int hit() { hits += 1; return hits; }\n}\n',
+    'src/lib.rs': 'pub fn parse(x: i32) -> i32 { x * 2 }\n',
+    'lib/report.rb': 'def summarize(rows)\n  rows.size\nend\n',
+    'web/index.php': '<?php\nfunction render($t) { return strtoupper($t); }\n',
+    'scripts/run.sh': 'start() {\n  echo up\n}\nstart\n',
+    'native/math.cpp': 'int square(int x) { return x * x; }\n',
+  };
+  for (const [f, c] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.writeFileSync(path.join(dir, f), c);
+  }
+  git(dir, 'init', '-q', '-b', 'main');
+  git(dir, '-c', 'user.email=t@example.com', '-c', 'user.name=Test', 'add', '-A');
+  git(dir, '-c', 'user.email=t@example.com', '-c', 'user.name=Test', 'commit', '-q', '-m', 'initial');
+  await run('project.openPath', dir);
+  await waitFor(async () => (await win.textContent(sel('project-widget'))).includes('polyglot'), { message: 'polyglot project open' });
+  for (const name of ['handle', 'hit', 'parse', 'summarize', 'render', 'start', 'square']) {
+    await waitFor(async () => (await kiln('indexHas', name)) === true, { message: `index has ${name}` });
+  }
+  const knowledge = path.join(userData, 'knowledge');
+  await waitFor(() => fs.existsSync(knowledge) && fs.readdirSync(knowledge).some((f) => f.startsWith('polyglot-') && !f.includes('@')), { message: 'graph saved automatically' });
+  const cli = (args) => JSON.parse(execFileSync(process.execPath, [path.join(APP, 'src/agent-tools/kg-cli.js'), ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, KILN_USER_DATA: userData } }));
+  assert.ok(cli(['variable', 'requests']).matches[0].writers.some((w) => w.name === 'handle'), 'Go variable writes in the graph');
+
+  // Main-branch graph: on a feature branch, a commit lands on main and the graph follows it.
+  await waitFor(async () => (await win.getAttribute(sel('branch-graph-status'), 'data-state').catch(() => null)) === 'ready', { message: 'main-branch graph ready' });
+  git(dir, 'checkout', '-q', '-b', 'feature-x');
+  const wt = path.join(tmp('kiln-e2e-wt-'), 'main');
+  git(dir, 'worktree', 'add', '-q', wt, 'main');
+  fs.writeFileSync(path.join(wt, 'cmd', 'metrics.go'), 'package main\n\nfunc mergedOnMain() int { return handle() }\n');
+  git(wt, 'add', '-A');
+  git(wt, '-c', 'user.email=t@example.com', '-c', 'user.name=Test', 'commit', '-q', '-m', 'merged on main');
+  const mainSha = git(dir, 'rev-parse', 'main').trim();
+  git(dir, 'worktree', 'remove', '--force', wt);
+  await waitFor(async () => (await win.getAttribute(sel('branch-graph-status'), 'data-commit')) === mainSha, { timeout: 60000, message: 'main graph synced in the background' });
+  await run('view.mainGraph');
+  await waitFor(async () => (await win.getAttribute(sel('knowledge-graph', '[data-source="main"]'), 'data-node-count').catch(() => '0')) > 0, { message: 'main graph shown' });
+  const onMain = await win.evaluate(async () => (await window.kiln.invoke('code:graph', { mode: 'all', source: 'main' })).nodes.some((n) => n.label === 'mergedOnMain'));
+  const inWork = await win.evaluate(async () => (await window.kiln.invoke('code:graph', { mode: 'all' })).nodes.some((n) => n.label === 'mergedOnMain'));
+  assert.equal(onMain, true, 'the commit on main is in the main graph');
+  assert.equal(inWork, false, 'the working tree (feature-x) does not have it');
+  assert.equal(cli(['symbol', 'mergedOnMain', '--ref', 'main']).matches.length, 1, 'agents see it with ref main');
+  await shot('12d-main-graph');
+});
+
 test('creates a JavaScript project and runs it', { timeout: 300000 }, async () => {
   const { dir } = await createProject('node-app', 'e2e-node');
   await waitBuild('success');

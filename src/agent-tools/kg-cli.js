@@ -12,11 +12,14 @@
 //   node kg-cli.js variable <name>          which functions read and write a variable / field / property
 //   node kg-cli.js index                    build the graph for a folder Kiln has not opened yet
 //
+// --ref main queries the main branch (kept in sync by Kiln in the background; also brought up to
+// date from git here), --ref <branch|tag|commit> any other ref. The default is the working tree.
+//
 // Names: Name, Class.Name, Namespace.Class.Name or path/file.py:Name. Run inside the project, or pass
 // --project <path>. Output is JSON.
 const kg = require('./kg-core');
 
-const USAGE = 'Usage: kg-cli.js <overview|search|symbol|usages|impact|path|file|variable|index> [args] [--project <path>] [--kind K] [--depth N] [--limit N]';
+const USAGE = 'Usage: kg-cli.js <overview|search|symbol|usages|impact|path|file|variable|index> [args] [--project <path>] [--ref main|<branch>] [--kind K] [--depth N] [--limit N]';
 
 function parse(argv) {
   const pos = [];
@@ -42,7 +45,7 @@ async function main() {
     process.stdout.write(`${USAGE}\n`);
     process.exit(command ? 0 : 1);
   }
-  const args = { project: opts.project, kind: opts.kind, depth: opts.depth, limit: opts.limit };
+  const args = { project: opts.project, kind: opts.kind, depth: opts.depth, limit: opts.limit, ref: opts.ref };
   if (command === 'search') args.query = pos.slice(1).join(' ');
   else if (command === 'path') {
     args.from = pos[1];

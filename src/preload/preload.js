@@ -27,6 +27,7 @@ const EVENTS = new Set([
   'templates:progress',
   'index:status',
   'index:changed',
+  'index:branch',
   'lsp:status',
   'lsp:diagnostics',
   'lsp:applyEdit',

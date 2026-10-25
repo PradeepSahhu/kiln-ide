@@ -190,3 +190,80 @@ test('the knowledge graph includes variables and which functions read and write 
   assert.deepEqual(total.writers.map((x) => x.label).sort(), ['__init__', 'add']);
   assert.deepEqual(total.readers.map((x) => x.label).sort(), ['add', 'summary']);
 });
+
+test('the knowledge graph covers Go, Java, Rust, C/C++, Ruby, PHP and Bash projects too', async (t) => {
+  const root = writeTree(tmpdir(), {
+    'shop/order.go': 'package shop\n\nimport "fmt"\n\nvar total int\nconst Limit = 10\n\ntype Order struct {\n\tID string\n\tQty int\n}\n\nfunc (o *Order) Add(n int) int {\n\to.Qty += n\n\ttotal = total + n\n\treturn helper(o.Qty)\n}\n\nfunc helper(x int) int {\n\ty := x * 2\n\tfmt.Println(y, Limit)\n\treturn y\n}\n',
+    'src/Shop/Cart.java': 'package shop;\nimport java.util.List;\npublic class Cart {\n  private int qty;\n  static final int LIMIT = 10;\n  public Cart(int q) { this.qty = q; }\n  public int add(int n) {\n    int before = qty;\n    qty += n;\n    return check(before);\n  }\n  private int check(int x) { return Math.max(x, LIMIT); }\n}\n',
+    'src/lib.rs': 'use std::fmt;\nstatic mut TOTAL: i32 = 0;\nconst MAX: i32 = 10;\npub struct Basket { items: i32 }\nimpl Basket {\n    pub fn push(&mut self, n: i32) -> i32 {\n        self.items += n;\n        let doubled = twice(self.items);\n        doubled\n    }\n}\nfn twice(x: i32) -> i32 { x * MAX }\n',
+    'native/stock.cpp': '#include <vector>\nint stockTotal = 0;\nclass Stock {\npublic:\n  int level;\n  int put(int n) { level += n; stockTotal = stockTotal + n; return clampLevel(level); }\n};\nint clampLevel(int x) { int y = x * 2; return y; }\n',
+    'app/ledger.rb': 'require "json"\nRATE = 10\nclass Ledger < Base\n  def initialize(qty)\n    @qty = qty\n  end\n  def record(n)\n    @qty += n\n    scale(@qty)\n  end\nend\ndef scale(x)\n  y = x * RATE\n  y\nend\n',
+    'web/Invoice.php': '<?php\nnamespace Shop;\nconst VAT = 20;\nclass Invoice {\n  private $amount = 0;\n  public function charge($n) {\n    $this->amount += $n;\n    return withVat($this->amount);\n  }\n}\nfunction withVat($x) { $y = $x * VAT; return $y; }\n',
+    'scripts/deploy.sh': 'COUNT=0\nbuild() {\n  local target=$1\n  COUNT=$((COUNT+1))\n  ship "$target"\n}\nship() { echo "$1"; }\nbuild app\n',
+  });
+  const files = ['shop/order.go', 'src/Shop/Cart.java', 'src/lib.rs', 'native/stock.cpp', 'app/ledger.rb', 'web/Invoice.php', 'scripts/deploy.sh'];
+  const w = startWorker(path.join(tmpdir(), 'graph.json'));
+  t.after(() => w.stop());
+  const stats = await w.call('init', { root, files });
+  assert.equal(stats.files, files.length, 'every file is indexed');
+  const g = await w.call('graph', { mode: 'all', limit: 5000 });
+  const node = (label, kind, file) => {
+    const n = g.nodes.find((x) => x.label === label && (!kind || x.kind === kind) && (!file || x.file === file));
+    assert.ok(n, `node ${label} (${kind || '*'}) in ${file || '*'}: ${g.nodes.filter((x) => x.file === file).map((x) => `${x.kind}:${x.label}`).join(', ')}`);
+    return n;
+  };
+  const has = (from, to, kind) => g.edges.some((e) => e.source === from.id && e.target === to.id && e.kind === kind);
+  const locals = async (n) => (await w.call('neighbors', { id: n.id })).locals.map((l) => `${l.kind}:${l.name}`);
+
+  // Go
+  const goAdd = node('Add', 'method', 'shop/order.go');
+  assert.equal(goAdd.container, 'Order', 'Go methods belong to their receiver type');
+  assert.ok(node('Order', 'struct', 'shop/order.go'));
+  assert.ok(has(goAdd, node('helper', 'function', 'shop/order.go'), 'calls'));
+  assert.ok(has(goAdd, node('Qty', 'field', 'shop/order.go'), 'writes'), 'o.Qty += n writes the field');
+  assert.ok(has(goAdd, node('total', 'variable', 'shop/order.go'), 'writes'));
+  assert.ok(has(node('helper', 'function', 'shop/order.go'), node('Limit', 'constant', 'shop/order.go'), 'reads'));
+  assert.ok((await locals(node('helper', 'function', 'shop/order.go'))).includes('local:y'));
+
+  // Java
+  const jAdd = node('add', 'method', 'src/Shop/Cart.java');
+  assert.ok(has(jAdd, node('check', 'method', 'src/Shop/Cart.java'), 'calls'));
+  assert.ok(has(jAdd, node('qty', 'field', 'src/Shop/Cart.java'), 'writes'), 'qty += n writes the implicit field');
+  assert.ok(has(node('Cart', 'constructor', 'src/Shop/Cart.java'), node('qty', 'field', 'src/Shop/Cart.java'), 'writes'), 'this.qty = q');
+  assert.ok(has(node('check', 'method', 'src/Shop/Cart.java'), node('LIMIT', 'constant', 'src/Shop/Cart.java'), 'reads'));
+  assert.ok((await locals(jAdd)).includes('local:before'));
+
+  // Rust
+  const push = node('push', 'method', 'src/lib.rs');
+  assert.equal(push.container, 'Basket', 'impl blocks give methods their type');
+  assert.ok(has(push, node('twice', 'function', 'src/lib.rs'), 'calls'));
+  assert.ok(has(push, node('items', 'field', 'src/lib.rs'), 'writes'));
+  assert.ok(has(node('twice', 'function', 'src/lib.rs'), node('MAX', 'constant', 'src/lib.rs'), 'reads'));
+  assert.ok(node('TOTAL', 'variable', 'src/lib.rs'));
+
+  // C++
+  const put = node('put', 'method', 'native/stock.cpp');
+  assert.ok(has(put, node('level', 'field', 'native/stock.cpp'), 'writes'));
+  assert.ok(has(put, node('stockTotal', 'variable', 'native/stock.cpp'), 'writes'));
+  assert.ok(has(put, node('clampLevel', 'function', 'native/stock.cpp'), 'calls'));
+
+  // Ruby
+  const record = node('record', 'method', 'app/ledger.rb');
+  assert.ok(has(record, node('@qty', 'field', 'app/ledger.rb'), 'writes'));
+  assert.ok(has(node('initialize', 'method', 'app/ledger.rb'), node('@qty', 'field', 'app/ledger.rb'), 'writes'));
+  assert.ok(has(record, node('scale', 'function', 'app/ledger.rb'), 'calls'));
+  assert.ok(has(node('scale', 'function', 'app/ledger.rb'), node('RATE', 'constant', 'app/ledger.rb'), 'reads'));
+
+  // PHP
+  const charge = node('charge', 'method', 'web/Invoice.php');
+  assert.ok(has(charge, node('amount', 'field', 'web/Invoice.php'), 'writes'), '$this->amount += $n');
+  assert.ok(has(charge, node('withVat', 'function', 'web/Invoice.php'), 'calls'));
+  assert.ok(has(node('withVat', 'function', 'web/Invoice.php'), node('VAT', 'constant', 'web/Invoice.php'), 'reads'));
+  assert.ok((await locals(node('withVat', 'function', 'web/Invoice.php'))).includes('local:y'));
+
+  // Bash
+  const build = node('build', 'function', 'scripts/deploy.sh');
+  assert.ok(has(build, node('ship', 'function', 'scripts/deploy.sh'), 'calls'));
+  assert.ok(has(build, node('COUNT', 'variable', 'scripts/deploy.sh'), 'writes'));
+  assert.ok((await locals(build)).includes('local:target'));
+});

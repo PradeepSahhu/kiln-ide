@@ -49,6 +49,7 @@ export async function openProject(path) {
     runs: { configs: [], selected: state.runConfig || null, sessions: [], active: null },
     layout: { ...s.layout, ...(state.layout || {}), zen: false },
     index: { state: 'indexing' },
+    branchGraph: { state: 'idle' },
     claude: { ...s.claude, probe: null },
   }));
   await refreshRunConfigs();

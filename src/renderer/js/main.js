@@ -91,7 +91,9 @@ function activeTerminalId() {
 function openSpecialView(kind, arg) {
   if (kind === 'graph') {
     const focus = arg && arg.focus;
-    return ed.openSpecial({ id: focus ? `graph:code:${focus}` : 'graph:code', kind: 'graph', title: focus ? `Graph: ${focus.split(/[.:]/).pop()}` : 'Knowledge Graph', data: { source: 'code', focus } });
+    const ref = arg && arg.source === 'main' ? 'main' : null;
+    const title = focus ? `Graph: ${focus.split(/[.:]/).pop()}` : ref ? `Knowledge Graph (${(store.get().branchGraph || {}).branch || 'main'})` : 'Knowledge Graph';
+    return ed.openSpecial({ id: `graph:code${ref ? ':main' : ''}${focus ? `:${focus}` : ''}`, kind: 'graph', title, data: { source: 'code', focus, ref } });
   }
   if (kind === 'artifacts') return ed.openSpecial({ id: 'graph:artifacts', kind: 'graph', title: 'Artifacts Graph', data: { source: 'artifacts' } });
   return ed.openSpecial({ id: 'flow', kind: 'flow', title: 'Message Flow' });
@@ -116,6 +118,8 @@ function registerCommands() {
     { id: 'view.artifacts', title: 'Artifacts Knowledge Base', run: () => openTool('right', 'artifacts') },
     { id: 'view.claude', title: 'Claude', run: needProject(() => openTool('right', 'claude')) },
     { id: 'view.knowledgeGraph', title: 'Knowledge Graph', run: needProject((arg) => openSpecialView('graph', arg)) },
+    { id: 'view.mainGraph', title: 'Knowledge Graph of the Main Branch', run: needProject(() => openSpecialView('graph', { source: 'main' })) },
+    { id: 'graph.syncMain', title: 'Sync the Main-Branch Knowledge Graph Now', run: needProject(() => invoke('code:branchSync').then((st) => { store.set({ branchGraph: st }); toast({ title: st.state === 'ready' ? `Knowledge graph of ${st.branch} is at ${st.short}` : 'No main or master branch to follow', timeout: 3000 }); })) },
     { id: 'view.artifactGraph', title: 'Artifacts Knowledge Graph', run: needProject(() => openSpecialView('artifacts')) },
     { id: 'view.messageFlow', title: 'Message Flow (Kafka)', run: needProject(() => openSpecialView('flow')) },
     { id: 'view.settings', title: 'Settings…', run: (section) => openModal('settings', { section: typeof section === 'string' ? section : undefined }) },
@@ -284,6 +288,18 @@ function offerAgentSetup() {
   });
 }
 
+/** Main-branch knowledge graph status (background sync of main / master). */
+function followBranchGraph() {
+  on('index:branch', (s) => store.set({ branchGraph: s || { state: 'idle' } }));
+  let root = null;
+  store.subscribe((s) => {
+    const r = s.project ? s.project.root : null;
+    if (r === root) return;
+    root = r;
+    if (r) setTimeout(() => invoke('code:branchStatus').then((st) => store.set({ branchGraph: st })).catch(() => {}), 1500);
+  });
+}
+
 function followTitle() {
   let last = '';
   store.subscribe((s) => {
@@ -358,6 +374,7 @@ async function boot() {
   installKeyHandlers();
   followSettings();
   followTitle();
+  followBranchGraph();
   offerAgentSetup();
   exposeTestApi();
   store.set({ settings, appInfo, recent, ready: true });

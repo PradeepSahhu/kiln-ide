@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const A = require('./analyzer');
 const G = require('./graph');
+const GS = require('./git-sync');
 
 const { TYPE_KINDS, CALLABLE_KINDS, LENS_KINDS, CS_DECL, CS_CONTAINERS, CS_TYPE_CONTEXT, TS_DECL } = A;
 const MAX_FILE = 1.5 * 1024 * 1024;
@@ -176,9 +177,9 @@ function nodeAt(lang, src, line, col) {
   const tree = parsers()[lang].parse(src);
   const pos = { row: line - 1, column: Math.max(0, col - 1) };
   let n = tree.rootNode.descendantForPosition(pos);
-  if (n && !/identifier/.test(n.type) && col > 1) {
+  if (n && !A.isIdentType(n.type) && col > 1) {
     const prev = tree.rootNode.descendantForPosition({ row: line - 1, column: col - 2 });
-    if (prev && /identifier/.test(prev.type)) n = prev;
+    if (prev && A.isIdentType(prev.type)) n = prev;
   }
   return { tree, node: n };
 }
@@ -189,7 +190,7 @@ function contextAt({ file, text, line, col }) {
   if (!lang) return null;
   const src = text != null ? text : fs.readFileSync(file, 'utf8');
   const { tree, node } = nodeAt(lang, src, line, col);
-  if (!node || !/identifier/.test(node.type)) {
+  if (!node || !A.isIdentType(node.type)) {
     tree.delete();
     return null;
   }
@@ -277,7 +278,7 @@ function references({ name, file, includeDecl = true, limit = 2000 }) {
       const after = src[idx + name.length] || '';
       if (!isIdentChar(before) && !isIdentChar(after)) {
         const n = tree.rootNode.descendantForIndex(idx, idx + name.length);
-        if (n && /identifier/.test(n.type) && n.text === name) {
+        if (n && A.isIdentType(n.type) && n.text === name) {
           const p = n.parent;
           const isDecl = p && (p.childForFieldName('name') || {}).id === n.id && (CS_DECL[p.type] || p.type === 'class_definition' || p.type === 'function_definition' || TS_DECL[p.type] || p.type === 'variable_declarator');
           if (includeDecl || !isDecl) {
@@ -383,6 +384,38 @@ function hover(params) {
   return { def: d, doc, count: res.defs.length, ctx: res.ctx };
 }
 
+// ------------------------------------------------ main-branch graph (from git)
+
+/** Load a saved branch graph (if it matches) into this worker's state. */
+async function gitOpen({ root, graphFile }) {
+  await ready;
+  state.root = root;
+  state.graphFile = graphFile;
+  state.files.clear();
+  state.defsByName.clear();
+  state.counts.clear();
+  state.kindCache.clear();
+  state.history.clear();
+  state.commit = null;
+  const saved = loadSaved();
+  if (saved) {
+    const s = G.deserialize(saved);
+    for (const k of ['files', 'defsByName', 'counts', 'history']) state[k] = s[k];
+    state.commit = saved.commit || null;
+  }
+  return { commit: state.commit, files: state.files.size };
+}
+
+async function gitSync({ root, commit, ref, branch }) {
+  await ready;
+  const r = await GS.syncFromGit(state, { root, commit, analyze: A.analyze, langOf });
+  state.ref = ref;
+  state.branch = branch;
+  state.kindCache.clear();
+  if (r.read || r.removed || !fs.existsSync(state.graphFile || '')) save();
+  return r;
+}
+
 // ---------------------------------------------------------- knowledge graph
 
 const graph = (opts) => G.graphView(state, opts || {});
@@ -391,7 +424,7 @@ const findNodes = ({ query, limit }) => G.findNodes(state, { query, limit });
 
 // ------------------------------------------------------------- dispatch
 
-const handlers = { init, update, definitions, references, documentSymbols, workspaceSymbols, codeLens, semanticTokens, hover, graph, neighbors, findNodes, context: contextAt, stats: () => G.statsOf(state), legend: () => ({ types: A.TOKEN_TYPES, modifiers: A.TOKEN_MODIFIERS }), save: () => save() };
+const handlers = { gitOpen, gitSync, init, update, definitions, references, documentSymbols, workspaceSymbols, codeLens, semanticTokens, hover, graph, neighbors, findNodes, context: contextAt, stats: () => G.statsOf(state), legend: () => ({ types: A.TOKEN_TYPES, modifiers: A.TOKEN_MODIFIERS }), save: () => save() };
 
 parentPort.on('message', async (msg) => {
   const fn = handlers[msg.type];

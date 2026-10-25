@@ -62,6 +62,7 @@ export const store = createStore({
   terminals: { list: [], active: null },
   claude: { chats: {}, active: 'chat-1', probe: null, status: {} },
   index: { state: 'idle' },
+  branchGraph: { state: 'idle' }, // main-branch knowledge graph (kept in sync from git)
   lsp: {},
   usages: null,
   modals: [], // stack of { type, props, resolve, key }

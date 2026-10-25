@@ -10,6 +10,7 @@ const kg = require('./kg-core');
 const VERSION = '1.0.0';
 const FIRST = 'Use this FIRST, before grep, find or reading whole files: it answers from Kiln IDE\'s structural knowledge graph of the codebase (files, classes, functions, variables, calls, reads/writes), which is precise and up to date.';
 const PROJECT_PARAM = { type: 'string', description: 'Absolute path of the project (or any folder inside it). Optional: defaults to the workspace / current directory.' };
+const REF_PARAM = { type: 'string', description: 'Optional. "main" queries the main branch (main/master, kept in sync in the background, including merged changes fetched from origin); a branch, tag or commit queries that ref. Default: the working tree (files on disk).' };
 
 const TOOLS = [
   { name: 'kg_overview', title: 'Project overview', description: `Summary of the codebase: files per language, most-called functions, most connected files and variables shared by many functions. Start here to get oriented. ${FIRST}`, props: {}, required: [] },
@@ -37,7 +38,7 @@ function toolList() {
     name: t.name,
     title: t.title,
     description: t.description,
-    inputSchema: { type: 'object', properties: { ...t.props, project: PROJECT_PARAM }, required: t.required, additionalProperties: false },
+    inputSchema: { type: 'object', properties: { ...t.props, project: PROJECT_PARAM, ...(t.name !== 'kg_index' ? { ref: REF_PARAM } : {}) }, required: t.required, additionalProperties: false },
     annotations: { title: t.title, readOnlyHint: t.name !== 'kg_index', destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }));
 }

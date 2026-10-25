@@ -6,8 +6,8 @@
 const path = require('path');
 const crypto = require('crypto');
 
-const LANG_BY_EXT = { '.cs': 'csharp', '.py': 'python', '.pyi': 'python', '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript', '.tsx': 'tsx', '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript' };
-const GRAMMAR = { csharp: 'tree-sitter-c-sharp.wasm', python: 'tree-sitter-python.wasm', typescript: 'tree-sitter-typescript.wasm', tsx: 'tree-sitter-tsx.wasm', javascript: 'tree-sitter-javascript.wasm' };
+const LANG_BY_EXT = { '.cs': 'csharp', '.py': 'python', '.pyi': 'python', '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript', '.tsx': 'tsx', '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript', '.go': 'go', '.java': 'java', '.rs': 'rust', '.c': 'cpp', '.h': 'cpp', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp', '.hxx': 'cpp', '.rb': 'ruby', '.php': 'php', '.sh': 'bash', '.bash': 'bash' };
+const GRAMMAR = { csharp: 'tree-sitter-c-sharp.wasm', python: 'tree-sitter-python.wasm', typescript: 'tree-sitter-typescript.wasm', tsx: 'tree-sitter-tsx.wasm', javascript: 'tree-sitter-javascript.wasm', go: 'tree-sitter-go.wasm', java: 'tree-sitter-java.wasm', rust: 'tree-sitter-rust.wasm', cpp: 'tree-sitter-cpp.wasm', ruby: 'tree-sitter-ruby.wasm', php: 'tree-sitter-php.wasm', bash: 'tree-sitter-bash.wasm' };
 
 // Semantic token legend shared with the renderer.
 const TOKEN_TYPES = ['namespace', 'class', 'interface', 'struct', 'enum', 'typeParameter', 'parameter', 'local', 'field', 'property', 'enumMember', 'event', 'function', 'method', 'decorator', 'constant', 'builtin', 'selfKeyword', 'module', 'record', 'delegate', 'attribute'];
@@ -54,6 +54,26 @@ const MEMBER = 2; // obj.x
 const LOCAL = 4;
 const PARAM = 8;
 const TS_FN = new Set(['function_declaration', 'function_expression', 'arrow_function', 'method_definition', 'generator_function_declaration', 'generator_function', 'function']);
+
+const { analyzeGeneric, GENERIC_LANGS } = require('./generic');
+
+const GENERIC = new Set(GENERIC_LANGS);
+const genericHelpers = {
+  traverse: (...a) => traverse(...a),
+  signature: (node) => {
+    const text = node.text.slice(0, 600);
+    return squash(/^\s*(def |function |[A-Za-z_][\w-]*\s*\(\)\s*\{)/.test(text) && !/[{;]\s*$/.test(text.split('\n')[0]) ? text.split('\n')[0] : text.split(/\{|=>|;/)[0]).slice(0, 240);
+  },
+  hash: (s) => hash(s),
+  squash: (s) => squash(s),
+  attributeOwners: (...a) => attributeOwners(...a),
+  attributeUses: (...a) => attributeUses(...a),
+  compactUses: (u) => compactUses(u),
+  summarizeLocals: (...a) => summarizeLocals(...a),
+};
+
+/** Node types that are names (for Go to Definition and Find Usages across languages). */
+const isIdentType = (type) => /identifier|^name$|^constant$|^word$|^variable_name$|^instance_variable$|^type_identifier$|^field_identifier$/.test(type);
 
 let parsers = {};
 let langs = {};
@@ -221,6 +241,7 @@ function signatureOf(lang, src, node) {
 }
 
 function analyze(lang, src, withTokens) {
+  if (GENERIC.has(lang)) return analyzeGeneric(lang, src, parsers[lang], genericHelpers);
   const tree = parsers[lang].parse(src);
   const defs = [];
   const counts = new Map();
@@ -690,6 +711,7 @@ module.exports = {
   getParsers,
   langOf,
   analyze,
+  isIdentType,
   signatureOf,
   hash,
   squash,

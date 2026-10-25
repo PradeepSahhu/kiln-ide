@@ -76,14 +76,14 @@ class GitService {
     return { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'en_US.UTF-8', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' };
   }
 
-  async raw(args, { cwd = this.root, input, encoding, timeout } = {}) {
+  async raw(args, { cwd = this.root, input, encoding, timeout, quiet = false } = {}) {
     const full = ['-c', 'core.quotepath=off', '-c', 'color.ui=false', ...args];
     const sub0 = args.find((a) => !a.startsWith('-'));
     // Commands that talk to a remote get the GitHub connection (gh login or token).
     const env = NETWORK.has(sub0) ? await github.gitEnv(this.env()) : this.env();
     const res = await run('git', full, { cwd, input, encoding, timeout, env });
     const sub = args.find((a) => !a.startsWith('-'));
-    if (LOGGED.has(sub) || (res.code !== 0 && sub !== 'show' && sub !== 'rev-parse' && sub !== 'show-ref')) {
+    if (!quiet && (LOGGED.has(sub) || (res.code !== 0 && sub !== 'show' && sub !== 'rev-parse' && sub !== 'show-ref'))) {
       this.ctx.send('git:console', {
         at: Date.now(),
         cmd: 'git ' + args.join(' '),

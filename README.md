@@ -55,9 +55,15 @@ Claude built in. Built on Electron, Monaco, xterm.js and the Claude Agent SDK.
   an isolated knowledge graph, answer questions with citations and check your code against their requirements.
 
 **Knowledge graph (for you and your AI agents)**
+- Built automatically when a project is opened, cloned or created, for C#, Python, JavaScript/TypeScript, Go,
+  Java, Rust, C/C++, Ruby, PHP and Bash.
 - Files, classes, functions and variables (module variables, constants, fields, properties) with calls, type use,
   inheritance, imports and which functions read and write each variable, plus every function's locals and
   parameters. Updated as code changes; stored on this machine only, never committed.
+- A second graph follows the **main branch** (main/master) in the background, straight from git objects, even
+  while you work on another branch: commits, merges and pulls on main, and merged pull requests picked up by a
+  periodic background fetch (every 10 minutes; Settings key `knowledgeGraph.fetchMinutes`). The status bar shows
+  the commit it is at; the graph view switches between the working tree and main; agents pass `ref: "main"`.
 - Visualizer with Files / Functions / Focus views, a Variables toggle and a details panel (callers, callees,
   reads, writes, locals).
 - Exposed to AI agents as a **skill** (`kiln-knowledge-graph`, a CLI) and an **MCP server** with tools
@@ -101,6 +107,17 @@ npm install        # also fetches Electron, fixes node-pty permissions and vendo
 npm start          # opens the Welcome screen with recent solutions
 KILN_OPEN=/path/to/project npm start   # open a project directly
 ```
+
+## Building the app
+
+```bash
+npm run dist:dir   # dist/mac-arm64/Kiln IDE.app (fast; open it from Finder or `open "dist/mac-arm64/Kiln IDE.app"`)
+npm run dist       # also dist/Kiln IDE-0.1.0-arm64.dmg and a .zip
+```
+
+The build is ad-hoc signed for local use (not notarized). Helper files that other processes run (the
+knowledge-graph tools for agents, the Python checker, pyright, tree-sitter grammars and the Claude Code binary)
+are kept outside the asar archive.
 
 ## Tests
 

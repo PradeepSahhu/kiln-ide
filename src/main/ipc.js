@@ -405,9 +405,17 @@ function register({ getContext, createWindow, rebuildMenu, broadcast }) {
   handle('code:workspaceSymbols', (ctx, query, kinds) => ctx.index.call('workspaceSymbols', { query, kinds, limit: 80 }));
   handle('code:codeLens', (ctx, file, text) => ctx.index.call('codeLens', { file, text }));
   handle('code:semanticTokens', (ctx, file, text) => ctx.index.call('semanticTokens', { file, text }));
-  handle('code:graph', (ctx, opts) => ctx.index.call('graph', opts || {}));
-  handle('code:neighbors', (ctx, id) => ctx.index.call('neighbors', { id }));
-  handle('code:findNodes', (ctx, query) => ctx.index.call('findNodes', { query }));
+  // source "main": the main-branch graph kept in sync from git (see codeindex/branch.js).
+  const graphOf = (ctx, source) => (source === 'main' && ctx.branchGraph.status.state === 'ready' ? ctx.branchGraph : ctx.index);
+  handle('code:graph', (ctx, opts = {}) => graphOf(ctx, opts.source).call('graph', opts));
+  handle('code:neighbors', (ctx, id, source) => graphOf(ctx, source).call('neighbors', { id }));
+  handle('code:findNodes', (ctx, query, source) => graphOf(ctx, source).call('findNodes', { query }));
+  handle('code:branchStatus', (ctx) => ctx.branchGraph.status);
+  handle('code:branchSync', async (ctx) => {
+    await ctx.branchGraph.fetch().catch(() => false);
+    await ctx.branchGraph.onGitChange();
+    return ctx.branchGraph.status;
+  });
   handle('code:indexHas', async (ctx, name) => ((await ctx.index.call('workspaceSymbols', { query: name, limit: 20 })) || []).some((d) => d.name === name));
   handle('code:graphFile', (ctx) => ctx.index.graphFile());
   handle('code:format', async (ctx, file, text) => {

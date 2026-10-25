@@ -18,9 +18,10 @@ function createState(root = null) {
 const crypto = require('crypto');
 
 /** File name of a project's saved graph inside <userData>/knowledge (shared by the IDE and agent tools). */
-function graphFileName(root) {
+function graphFileName(root, branch) {
   const id = crypto.createHash('sha1').update(root).digest('hex').slice(0, 16);
-  return `${path.basename(root).replace(/[^\w.-]/g, '_')}-${id}.json`;
+  const suffix = branch ? `@${String(branch).replace(/[^\w.-]/g, '_')}` : '';
+  return `${path.basename(root).replace(/[^\w.-]/g, '_')}-${id}${suffix}.json`;
 }
 
 const defKey = (rel, d) => `${rel}::${d.container ? d.container + '.' : ''}${d.name}::${d.kind}`;
@@ -80,6 +81,9 @@ function serialize(state, version) {
   return {
     version,
     root: state.root,
+    commit: state.commit || undefined,
+    ref: state.ref || undefined,
+    branch: state.branch || undefined,
     savedAt: Date.now(),
     files: Object.fromEntries([...state.files].map(([rel, e]) => [rel, { lang: e.lang, mtime: e.mtime, size: e.size, defs: e.defs.map(({ file, ...d }) => d), counts: e.counts, calls: e.calls, bases: e.bases, imports: e.imports, uses: e.uses, locals: e.locals }])),
     history: Object.fromEntries(state.history),
@@ -89,6 +93,9 @@ function serialize(state, version) {
 /** State from a saved graph file (as written by serialize). */
 function deserialize(data) {
   const state = createState(data.root);
+  state.commit = data.commit || null;
+  state.ref = data.ref || null;
+  state.branch = data.branch || null;
   for (const [k, v] of Object.entries(data.history || {})) state.history.set(k, v);
   for (const [rel, e] of Object.entries(data.files || {})) addEntry(state, rel, { ...e, defs: e.defs.map((d) => ({ ...d })) }, { trackHistory: false });
   return state;

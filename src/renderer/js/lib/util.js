@@ -144,7 +144,7 @@ export const LANG_BY_EXT = {
   '.html': 'html', '.htm': 'html', '.css': 'css', '.scss': 'scss', '.less': 'less', '.md': 'markdown', '.markdown': 'markdown',
   '.yml': 'yaml', '.yaml': 'yaml', '.toml': 'ini', '.ini': 'ini', '.cfg': 'ini', '.env': 'ini', '.editorconfig': 'ini', '.sln': 'ini',
   '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell', '.ps1': 'powershell', '.psm1': 'powershell', '.bat': 'bat', '.cmd': 'bat',
-  '.sql': 'sql', '.go': 'go', '.rs': 'rust', '.java': 'java', '.kt': 'kotlin', '.kts': 'kotlin', '.swift': 'swift', '.c': 'c', '.h': 'cpp', '.cpp': 'cpp', '.hpp': 'cpp', '.cc': 'cpp', '.rb': 'ruby', '.php': 'php', '.r': 'r', '.lua': 'lua', '.dart': 'dart', '.graphql': 'graphql', '.proto': 'protobuf', '.http': 'http', '.dockerfile': 'dockerfile',
+  '.sql': 'sql', '.go': 'go', '.rs': 'rust', '.java': 'java', '.kt': 'kotlin', '.kts': 'kotlin', '.swift': 'swift', '.c': 'c', '.h': 'cpp', '.cpp': 'cpp', '.hpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.hh': 'cpp', '.hxx': 'cpp', '.rb': 'ruby', '.php': 'php', '.r': 'r', '.lua': 'lua', '.dart': 'dart', '.graphql': 'graphql', '.proto': 'protobuf', '.http': 'http', '.dockerfile': 'dockerfile',
 };
 
 export function languageOf(file) {

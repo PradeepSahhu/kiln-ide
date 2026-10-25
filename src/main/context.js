@@ -12,6 +12,7 @@ const { RunService } = require('./services/run');
 const { TerminalService } = require('./services/terminal');
 const { ClaudeService } = require('./services/claude');
 const { CodeIndex } = require('./services/codeindex');
+const { BranchGraph } = require('./services/codeindex/branch');
 const { LanguageServices } = require('./services/lsp');
 const { LocalHistory } = require('./services/local-history');
 const { TestService } = require('./services/tests');
@@ -38,6 +39,7 @@ class ProjectContext {
     this.terminals = new TerminalService(this);
     this.claude = new ClaudeService(this);
     this.index = new CodeIndex(this);
+    this.branchGraph = new BranchGraph(this);
     this.lsp = new LanguageServices(this);
     this.history = new LocalHistory(this);
     this.tests = new TestService(this);
@@ -70,7 +72,12 @@ class ProjectContext {
         this.index.onFsChange(e.paths);
         if (e.overflow || e.paths.some((p) => MANIFEST.test(p))) this.scheduleRedetect();
       },
-      onGitChange: () => this.send('git:changed', {}),
+      onGitChange: () => {
+        this.send('git:changed', {});
+        // Follow main in the background (commits, merges, pulls, fetched origin/main).
+        clearTimeout(this.branchTimer);
+        this.branchTimer = setTimeout(() => this.branchGraph.onGitChange(), 800);
+      },
     });
     this.watcher.start();
     let branch = null;
@@ -89,6 +96,7 @@ class ProjectContext {
     fsSvc
       .listFiles(resolved, gitInfo.root)
       .then(({ files }) => (this.root === resolved ? this.index.open(resolved, files) : null))
+      .then(() => (this.root === resolved && gitInfo.isRepo ? this.branchGraph.open(resolved) : null))
       .catch((err) => console.warn('[index]', err.message));
     return { root: resolved, name: path.basename(resolved), detection: this.detection, git: gitInfo, state: settings.getProjectState(resolved) };
   }
@@ -119,6 +127,8 @@ class ProjectContext {
     this.terminals.dispose();
     this.claude.dispose();
     this.index.dispose();
+    clearTimeout(this.branchTimer);
+    this.branchGraph.dispose();
     this.lsp.dispose();
     this.tests.cancel();
     this.kafka.disconnect().catch(() => {});
