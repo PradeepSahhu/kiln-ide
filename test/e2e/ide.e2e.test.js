@@ -948,6 +948,48 @@ test('importing a Go / Java / Rust / Ruby / PHP project builds its knowledge gra
   await shot('12d-main-graph');
 });
 
+test('message flow: the real topic, consumer group and database names come from the deployment files', { timeout: 180000 }, async () => {
+  const dir = path.join(workspace, 'shop-deploy');
+  const files = {
+    'orders/package.json': JSON.stringify({ name: 'orders', dependencies: { kafkajs: '^2.2.4' } }),
+    'orders/producer.js': "const { Kafka } = require('kafkajs');\nconst producer = new Kafka({ brokers: ['k:9092'] }).producer();\nasync function publish(order) {\n  await producer.send({ topic: process.env.ORDERS_TOPIC || 'orders-local', messages: [{ value: JSON.stringify(order) }] });\n}\nmodule.exports = { publish };\n",
+    'billing/requirements.txt': 'kafka-python\nsqlalchemy\npsycopg2-binary\n',
+    'billing/worker.py': 'import os\nfrom kafka import KafkaConsumer\n\n\nclass Invoice(Base):\n    __tablename__ = "invoices"\n\n\nconsumer = KafkaConsumer(os.getenv("ORDERS_TOPIC", "orders"), group_id=os.getenv("GROUP_ID", "billing-local"))\nfor msg in consumer:\n    session.add(Invoice(order=msg.value))\n',
+    'deploy/prod/orders.yaml': 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\nspec:\n  template:\n    spec:\n      containers:\n        - name: orders\n          image: registry.example.com/shop/orders:2.0.1\n          envFrom:\n            - configMapRef:\n                name: shop-topics\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: shop-topics\ndata:\n  ORDERS_TOPIC: shop.orders.v1\n',
+    'deploy/prod/billing.yaml': 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: billing\nspec:\n  template:\n    spec:\n      containers:\n        - name: billing\n          env:\n            - name: ORDERS_TOPIC\n              value: shop.orders.v1\n            - name: GROUP_ID\n              value: billing-prod\n            - name: DATABASE_URL\n              valueFrom:\n                secretKeyRef:\n                  name: billing-db\n                  key: url\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: billing-db\nstringData:\n  url: postgresql://billing:pw@pg.prod.internal:5432/billing_prod\n',
+    'deploy/dev/billing.yaml': 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: billing\nspec:\n  template:\n    spec:\n      containers:\n        - name: billing\n          env:\n            - name: ORDERS_TOPIC\n              value: shop.orders.v1\n            - name: GROUP_ID\n              value: billing-dev\n            - name: DATABASE_URL\n              value: postgresql://billing:pw@localhost:5432/billing_dev\n',
+    'deploy/kafka/topics.yaml': 'apiVersion: kafka.strimzi.io/v1beta2\nkind: KafkaTopic\nmetadata:\n  name: shop.orders.v1\nspec:\n  partitions: 12\n  replicas: 3\n---\napiVersion: kafka.strimzi.io/v1beta2\nkind: KafkaTopic\nmetadata:\n  name: shop.refunds.v1\nspec:\n  partitions: 3\n',
+  };
+  for (const [f, c] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.writeFileSync(path.join(dir, f), c);
+  }
+  await run('project.openPath', dir);
+  await waitFor(async () => (await win.textContent(sel('project-widget'))).includes('shop-deploy'), { message: 'project open' });
+  await run('view.messageFlow');
+  await win.waitForSelector(sel('message-flow'));
+  await run('flow.refresh');
+  const node = (label) => sel('flow-node', `[data-label="${label}"]`);
+  await waitFor(async () => !!(await win.$(node('shop.orders.v1'))) && !!(await win.$(node('billing_prod'))), { timeout: 60000, message: 'real topic and database names' });
+  const topicLabels = await win.$$eval(sel('flow-node', '[data-type="topic"]'), (els) => els.map((e) => e.dataset.label));
+  assert.deepEqual(topicLabels, ['shop.orders.v1'], 'the deployed topic, not the defaults in the code (orders-local, orders)');
+  assert.ok((await win.$$eval('.flow-edge-label', (els) => els.map((e) => e.textContent))).includes('group billing-prod'), 'the production consumer group');
+  // Nodes may sit under the toolbar after the graph is fitted to the canvas: click the node itself.
+  await win.locator(node('shop.orders.v1')).dispatchEvent('click');
+  await win.waitForSelector(sel('flow-topic-sources'));
+  assert.match(await win.textContent(sel('flow-topic-sources')), /production[\s\S]*shop\.orders\.v1[\s\S]*prod\/orders\.yaml/);
+  assert.match(await win.textContent(sel('flow-topic-declared')), /12 partitions · 3 replicas/);
+  assert.match(await win.textContent(sel('flow-group-sources')), /billing-prod[\s\S]*billing-dev/);
+  await shot('32-message-flow-deployment');
+  // The database column may be drawn beyond the visible canvas: click the node itself.
+  await win.locator(node('billing_prod')).dispatchEvent('click');
+  await win.waitForSelector(sel('flow-db-sources-variants'));
+  assert.match(await win.textContent(sel('flow-db-sources-variants')), /production\s*billing_prod[\s\S]*development\s*billing_dev/);
+  assert.doesNotMatch(await win.textContent(sel('message-flow')), /billing:pw/, 'no credentials are shown');
+  await win.click(sel('message-flow'), { position: { x: 30, y: 300 } });
+  await waitFor(async () => /shop\.refunds\.v1/.test(await win.textContent(sel('flow-unused-topics')).catch(() => '')), { message: 'declared topics no code uses' });
+});
+
 test('creates a JavaScript project and runs it', { timeout: 300000 }, async () => {
   const { dir } = await createProject('node-app', 'e2e-node');
   await waitBuild('success');

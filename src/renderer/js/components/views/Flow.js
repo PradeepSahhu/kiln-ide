@@ -12,11 +12,34 @@ import { Spinner } from '../ui.js';
 
 const SIZE = { service: [196, 54], topic: [178, 40], db: [158, 58] };
 
+const ENV_LABEL = { prod: 'production', staging: 'staging', qa: 'QA', dev: 'development', default: 'default' };
+const SOURCE_LABEL = { k8s: 'Kubernetes', helm: 'Helm', kustomize: 'Kustomize', compose: 'docker-compose', dotenv: '.env', appsettings: 'appsettings', code: 'code' };
+
+/** Where a name comes from, for the node's second line: "from k8s/orders.yaml". */
+function shortSource(t) {
+  const s = (t.sources || []).find((x) => x.rel);
+  return s ? `from ${s.rel.split('/').slice(-2).join('/')}` : t.via && t.via.length ? `from ${t.via[0]}` : 'Kafka topic';
+}
+
+/** The sources of a name (topic, consumer group, database): environment, value, file:line. */
+function Sources({ title, sources, variants, testid }) {
+  const list = (sources || []).filter((x) => x.rel || x.source === 'code');
+  if (!list.length && !variants) return null;
+  return html`<div class="flow-sources" data-testid=${testid}>
+    <div class="section-title">${title}</div>
+    ${variants ? html`<div class="kv-list" data-testid=${`${testid}-variants`}>${Object.entries(variants).map(([env, v]) => html`<span class="k">${ENV_LABEL[env] || env}</span><span class="mono">${v}</span>`)}</div>` : null}
+    ${list.slice(0, 12).map((x) => html`<div class="flow-source" title=${x.rel ? `Open ${x.rel}${x.line ? `:${x.line}` : ''}` : 'default in the code'} onClick=${() => x.file && ed.openFile(x.file, { line: x.line || 1 })}>
+        <div class="row" style="gap:6px"><span class=${cls('badge', x.environment === 'prod' && 'ok')}>${ENV_LABEL[x.environment] || x.environment}</span><span class="mono value">${x.secret ? '(secret)' : x.value}</span></div>
+        <div class="muted where">${SOURCE_LABEL[x.source] || x.source}${x.rel ? ` · ${x.rel}${x.line ? `:${x.line}` : ''}` : ''}${x.from ? ` · ${x.from}${x.fromKey ? ` / ${x.fromKey}` : ''}` : x.key && x.source !== 'code' ? ` · ${x.key}` : ''}</div>
+      </div>`)}
+  </div>`;
+}
+
 function layout(flow) {
   const nodes = [
-    ...flow.services.map((s) => ({ id: s.id, type: 'service', label: s.name, sub: s.lang === 'dotnet' ? '.NET service' : s.lang === 'python' ? 'Python service' : 'Node service', data: s })),
-    ...flow.topics.map((t) => ({ id: t.id, type: 'topic', label: t.name, sub: t.resolved ? (t.via && t.via.length ? `from ${t.via[0]}` : 'Kafka topic') : 'unresolved name', data: t })),
-    ...flow.databases.map((d) => ({ id: d.id, type: 'db', label: d.name, sub: d.type, data: d })),
+    ...flow.services.map((s) => ({ id: s.id, type: 'service', label: s.name, sub: `${s.lang === 'dotnet' ? '.NET' : s.lang === 'python' ? 'Python' : 'Node'} service${s.deployments && s.deployments.length ? ` · ${s.deployments[0].kind}` : ''}`, data: s })),
+    ...flow.topics.map((t) => ({ id: t.id, type: 'topic', label: t.name, sub: !t.resolved ? 'unresolved name' : t.declared && t.declared.length && t.declared[0].partitions ? `${t.declared[0].partitions} partitions · ${shortSource(t)}` : shortSource(t), data: t })),
+    ...flow.databases.map((d) => ({ id: d.id, type: 'db', label: d.name, sub: d.hosts && d.hosts.length ? `${d.type} · ${d.hosts[0]}` : d.type, data: d })),
   ];
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const edges = flow.edges.filter((e) => byId.has(e.from) && byId.has(e.to));
@@ -103,6 +126,7 @@ function NodeShape({ n, live, dim, selected }) {
 }
 
 export function MessageFlowView() {
+  const root = useStore((st) => st.project && st.project.root);
   const [flow, setFlow] = useState(null);
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState(null);
@@ -130,6 +154,17 @@ export function MessageFlowView() {
     register('flow.refresh', 'Refresh Message Flow', load, { hidden: true });
   }, []);
   const L = useMemo(() => (flow ? layout(flow) : null), [flow]);
+  // Fit the whole graph in the canvas (never larger than 100%).
+  const fit = () => {
+    const el = svgRef.current;
+    if (!el || !L) return;
+    const r = el.getBoundingClientRect();
+    const k = Math.max(0.3, Math.min(1, (r.width - 40) / Math.max(L.width, 1), (r.height - 80) / Math.max(L.height, 1)));
+    setView({ x: 0, y: 0, k });
+  };
+  useEffect(() => {
+    if (L) setTimeout(fit, 0);
+  }, [L]);
   const connect = async () => {
     setConnecting(true);
     try {
@@ -181,6 +216,7 @@ export function MessageFlowView() {
         <span class="badge accent">Message flow</span>
         <span class="muted" style="font-size:12px">${flow ? `${flow.services.length} services · ${flow.topics.length} topics · ${flow.databases.length} databases · scanned ${flow.scanned} files in ${flow.ms} ms` : ''}</span>
         <div class="spacer"></div>
+        <button class="icon-btn sm" title="Fit to View" data-testid="flow-fit" style="background:var(--bg-elevated)" onClick=${fit}><${Icon} name="fit" size=${14} /></button>
         <input class="input" style="width:200px" placeholder="Bootstrap servers" value=${brokers} onInput=${(e) => setBrokers(e.target.value)} />
         <button class="btn small" style="background:var(--bg-elevated)" disabled=${connecting || !brokers} onClick=${connect}>${connecting ? html`<${Spinner} />` : html`<${Icon} name="link" size=${13} />`}${live ? 'Refresh live' : 'Connect live'}</button>
         <button class="icon-btn" style="background:var(--bg-elevated)" title="Re-scan code" onClick=${load}>${loading ? html`<${Spinner} />` : html`<${Icon} name="refresh" />`}</button>
@@ -218,12 +254,19 @@ export function MessageFlowView() {
                 <div class="row" style="padding:0 12px 8px;gap:6px"><button class="btn small" onClick=${async () => setPeek(await invoke('kafka:peek', selNode.label, 25).catch((err) => { errorToast('Peek failed', err); return null; }))}><${Icon} name="eye" size=${13} />Peek messages</button>
                 <button class="btn small" onClick=${async () => { const { prompt } = await import('../../lib/ui.js'); const v = await prompt({ title: `Publish to ${selNode.label}`, label: 'Message value (JSON or text):', value: '{"test": true}', ok: 'Publish' }); if (v) { await invoke('kafka:publish', selNode.label, { value: typeof v === 'string' ? v : v.value }).then(() => toast({ kind: 'success', title: 'Message published' })).catch((err) => errorToast('Publish failed', err)); } }}><${Icon} name="upload" size=${13} />Publish test message</button></div>` : null}
             ${peek ? html`<div class="section-title">Latest messages (${peek.length})</div>${peek.map((m) => html`<div style="padding:4px 12px;border-bottom:1px solid var(--border-inner);font-size:12px"><div class="muted">p${m.partition} · offset ${m.offset} · ${timeAgo(m.timestamp)}${m.key ? ` · key ${m.key}` : ''}</div><pre class="mono" style="margin:2px 0;white-space:pre-wrap;user-select:text">${prettyJson(m.value)}</pre></div>`)}` : null}
+            ${selNode.type === 'topic' ? html`<${Sources} title="Name comes from" sources=${selNode.data.sources} variants=${selNode.data.variants} testid="flow-topic-sources" />
+                ${selNode.data.declared && selNode.data.declared.length ? html`<div class="section-title">Declared in the deployment</div>${selNode.data.declared.map((d) => html`<div class="list-row" style="padding:2px 12px" data-testid="flow-topic-declared" onClick=${() => ed.openFile(d.file, { line: d.line || 1 })}><span class="badge">${d.source}</span><span style="font-size:12px">${d.partitions ? `${d.partitions} partitions` : ''}${d.replicas ? ` · ${d.replicas} replicas` : ''}</span><span class="muted ellipsis" style="font-size:11px">${d.rel}${d.line ? `:${d.line}` : ''}</span></div>`)}` : null}` : null}
+            ${selNode.type === 'db' ? html`<${Sources} title="Database name comes from" sources=${selNode.data.sources} variants=${selNode.data.variants} testid="flow-db-sources" />` : null}
+            ${selNode.type === 'service' && selNode.data.deployments && selNode.data.deployments.length ? html`<div class="section-title">Deployed as</div>${selNode.data.deployments.map((d) => html`<div class="list-row" style="padding:2px 12px" data-testid="flow-deployment"><${Icon} name="docker" size=${13} className="muted" /><span style="font-size:12px">${d.name}</span><span class="badge">${d.kind}</span><span class="muted ellipsis" style="font-size:11px">${d.rel}</span></div>`)}` : null}
+            ${selEdges.filter((e) => e.kind === 'consume' && e.groups.length).map((e) => html`<${Sources} title=${`Consumer group of ${L.byId.get(e.to).label}: ${e.groups[0]}`} sources=${e.groupSources} variants=${e.groupVariants} testid="flow-group-sources" />`)}
             <div class="section-title">Where in the code</div>
             ${selEdges.map((e) => html`<div style="padding:4px 12px"><div style="font-size:12px;font-weight:600">${e.kind === 'produce' ? `publishes to ${L.byId.get(e.to).label}` : e.kind === 'consume' ? `${L.byId.get(e.to).label} consumes ${L.byId.get(e.from).label}` : `writes to ${L.byId.get(e.to).label}${e.tables.length ? ` (${e.tables.join(', ')})` : ''}`}</div>
                 ${e.refs.slice(0, 12).map((r) => html`<div class="list-row" style="padding:2px 0;min-height:22px" onClick=${() => ed.openFile(r.file, { line: r.line })} title=${r.snippet}><${Icon} name="file" size=${13} className="muted" /><span style="font-size:12px">${r.rel}:${r.line}</span><span class="muted ellipsis" style="font-size:11px">${r.framework}</span></div>`)}</div>`)}
           </div>`
         : html`<div><h4>Message flow</h4>
-            <div class="muted" style="padding:4px 12px;font-size:12px;line-height:1.5">Which service publishes to which Kafka topic, who consumes it, and which databases they write to. Click a node to see the code; connect to a broker for live message counts, consumer lag and message peeking.</div>
+            <div class="muted" style="padding:4px 12px;font-size:12px;line-height:1.5">Which service publishes to which Kafka topic, who consumes it (and in which consumer group), and which databases they write to - with the real names from the deployment files (Kubernetes, Helm, Kustomize, docker-compose, .env, appsettings), production first. Click a node to see where each name comes from and the code; connect to a broker for live message counts, consumer lag and message peeking.</div>
+            ${flow && flow.deploymentFiles && flow.deploymentFiles.length ? html`<div class="section-title">Deployment files read (${flow.deploymentFiles.length})</div><div data-testid="flow-deployment-files">${flow.deploymentFiles.slice(0, 30).map((f) => html`<div class="list-row" style="padding:1px 12px;min-height:20px;font-size:12px" onClick=${() => ed.openFile(`${root}/${f}`)}><${Icon} name="file" size=${12} className="muted" /><span class="ellipsis">${f}</span></div>`)}</div>` : null}
+            ${flow && flow.declaredTopics && flow.declaredTopics.length ? html`<div class="section-title">Declared topics no code uses</div><div data-testid="flow-unused-topics">${flow.declaredTopics.map((t) => html`<div class="list-row" style="padding:1px 12px;min-height:20px;font-size:12px" onClick=${() => ed.openFile(t.declared[0].file, { line: t.declared[0].line || 1 })}><${Icon} name="topic" size=${12} className="muted" /><span class="mono">${t.name}</span><span class="muted" style="font-size:11px">${t.declared[0].source}</span></div>`)}</div>` : null}
             ${live ? html`<div class="section-title">Broker</div><div class="kv-list">${live.topics.slice(0, 30).map((t) => html`<span class="k">${t.name}</span><span>${t.messages.toLocaleString()} msgs</span>`)}</div>` : null}
           </div>`}
     </div>

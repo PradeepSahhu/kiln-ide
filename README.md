@@ -134,8 +134,16 @@ More in [Screenshots](#screenshots).
   re-read changed files themselves, so answers stay correct when the IDE is closed.
 
 **Visualizers**
-- Kafka message flow: topics, producing and consuming services and the databases they write to, from static
-  analysis of C#, Python and JS code, with an optional live connection to the brokers.
+- Kafka message flow: topics, producing and consuming services, consumer groups and the databases they write
+  to, from static analysis of C#, Python and JS code, with an optional live connection to the brokers.
+- **Real names from the deployment**: topic names, consumer groups and database names are read from the
+  deployment files anywhere in the repository - Kubernetes manifests (env, envFrom, ConfigMaps, Secrets),
+  Helm charts (values*.yaml applied to the templates), Kustomize overlays, docker-compose, `.env` and
+  `appsettings.{Environment}.json` - production first, with the value per environment (staging, dev) and the
+  file and line each one comes from. .NET configuration keys (`Kafka:Topic` / `Kafka__Topic`), options classes
+  and pydantic settings are followed to their env vars. Strimzi `KafkaTopic` resources and Terraform
+  `kafka_topic` give partitions and replicas, and topics no code uses are listed. Credentials in connection
+  strings are never read out.
 
 **Personalization**
 - 18 built-in themes plus a **Theme Editor**: create themes from any theme, edit every UI, editor, syntax and
@@ -291,6 +299,12 @@ background, so agents can compare.
 
 ![Message flow diagram](docs/screenshots/message-flow.png)
 
+**Real names from the deployment files.** The topic `shop.orders.v1`, consumer group `billing-prod` and database
+`billing_prod` come from the production Kubernetes manifests (a ConfigMap and a Secret) - not from the defaults
+in the code - with the development values beside them and the Strimzi topic's partitions.
+
+![Message flow with names from the deployment](docs/screenshots/message-flow-deployment.png)
+
 ### Claude and AI agents
 
 **Claude chat.** Claude creates a file; the tool call is shown in the chat and the file opens in the editor.
@@ -391,7 +405,7 @@ Find Usages, refactorings in Python, C# (including Roslyn through csharp-ls) and
 debugging tests from the gutter with coverage (pytest, node:test, xUnit), split editors and pinned tabs, committing
 individual lines and the Git log actions (tag, cherry-pick, revert, interactive rebase, reset), the AI
 features (inline completion, Generate Documentation / Tests, review, commit message, Explain Exception), calling
-FastAPI, Express and ASP.NET Core endpoints from the Send buttons, the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
+FastAPI, Express and ASP.NET Core endpoints from the Send buttons, the knowledge graph, the Kafka flow diagram (with names from Kubernetes manifests, a Secret and Strimzi topics), debugging Python and C#, themes and the theme editor,
 keymap customization, Search Everywhere, Local History, skills and the knowledge-graph MCP server, installing
 the knowledge graph for agents (into a scratch home folder), the GitHub connection, and a live Claude edit. Screenshots go to
 `$TMPDIR/kiln-e2e-shots`.

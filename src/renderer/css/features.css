@@ -532,3 +532,8 @@
 .http-status.redirect { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
 .http-status.fail { color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent); }
 .endpoint-row { gap: 8px; }
+.flow-source { padding: 4px 12px; cursor: pointer; }
+.flow-source:hover { background: var(--bg-hover); }
+.flow-source .badge { flex: none; }
+.flow-source .value { font-size: 12px; word-break: break-all; }
+.flow-source .where { font-size: 11px; margin-top: 1px; word-break: break-all; }
