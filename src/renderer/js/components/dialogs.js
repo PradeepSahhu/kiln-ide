@@ -34,9 +34,20 @@ export function Modal({ title, children, footer, wide, testid, onClose, classNam
       closeRef.current();
     };
     window.addEventListener('keydown', k);
-    // Take focus from the editor (which would swallow Escape and keep typing into the file).
+    // Take focus from the editor (which would swallow Escape and keep typing into the file), and keep
+    // it: an editor focused later (a timer, a reveal) must not take the keyboard from the dialog.
     if (boxRef.current && !boxRef.current.contains(document.activeElement)) boxRef.current.focus({ preventScroll: true });
-    return () => window.removeEventListener('keydown', k);
+    const keep = (e) => {
+      const box = boxRef.current;
+      if (!layerRef.current.top || !box || box.contains(e.target)) return;
+      if (e.target.closest && e.target.closest('.popup, .context-menu, .toasts, .modal-backdrop')) return;
+      box.focus({ preventScroll: true });
+    };
+    document.addEventListener('focusin', keep);
+    return () => {
+      window.removeEventListener('keydown', k);
+      document.removeEventListener('focusin', keep);
+    };
   }, []);
   onClose = close;
   return html`<div class="modal-backdrop" onMouseDown=${(e) => e.target === e.currentTarget && onClose()}>

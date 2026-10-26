@@ -20,6 +20,7 @@ import { SkillsPanel } from './panels/Skills.js';
 import { ArtifactsPanel } from './panels/Artifacts.js';
 import { DebugPanel } from './panels/Debug.js';
 import { StructurePanel, TodoPanel, UsagesPanel, TestsPanel, PackagesPanel } from './panels/Tools.js';
+import { EndpointsPanel } from './EndpointsView.js';
 
 const PANELS = {
   project: Explorer,
@@ -35,6 +36,7 @@ const PANELS = {
   usages: UsagesPanel,
   todo: TodoPanel,
   packages: PackagesPanel,
+  endpoints: EndpointsPanel,
   claude: ClaudePanel,
   agents: AgentsPanel,
   skills: SkillsPanel,

@@ -97,6 +97,7 @@ function buildMenuTemplate({ recent = [], send, keymap = {} }) {
             c('Tests', 'view.tests'),
             c('TODO', 'view.todo'),
             c('Packages', 'view.packages'),
+            c('Endpoints', 'view.endpoints'),
             { type: 'separator' },
             c('Claude', 'view.claude'),
             c('AI Agents', 'view.agents'),

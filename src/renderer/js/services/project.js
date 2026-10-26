@@ -102,7 +102,11 @@ export function initProject() {
   on('fs:changed', ({ paths, overflow }) => {
     store.set((s) => ({ fsTick: (s.fsTick || 0) + 1, fsChanged: overflow ? null : paths }));
     const agents = store.get().agents || {};
-    const follow = !!(agents.follow !== false && agents.lastActivity && Date.now() - agents.lastActivity < 20000);
+    // Follow files agents change: a CLI agent active in a terminal, or a Claude chat that is working
+    // (it may write files with Bash as well as with its edit tools).
+    const chats = Object.values((store.get().claude || {}).chats || {});
+    const claudeWorking = chats.some((c) => c.status === 'busy' && c.follow !== false);
+    const follow = !!((agents.follow !== false && agents.lastActivity && Date.now() - agents.lastActivity < 20000) || claudeWorking);
     ed.onFsChanged(paths, { follow });
     for (const p of paths) ed.invalidateBlame(p);
   });

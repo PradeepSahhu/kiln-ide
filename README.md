@@ -62,6 +62,17 @@ More in [Screenshots](#screenshots).
   use, never into your environment), the TypeScript language service for JavaScript / TypeScript, and
   Kiln's syntax-tree engine for Change Signature, Safe Delete, Pull Members Up and C# without csharp-ls.
 
+**HTTP endpoints**
+- A **▶ Send** button above every endpoint method - FastAPI and Flask, Express, ASP.NET Core minimal APIs and
+  controllers - with its full path (APIRouter / Blueprint / express.Router / MapGroup / controller prefixes,
+  also when the router is mounted in another file).
+- Click it to enter the path, query and header parameters and the JSON body (an example is filled in from the
+  model), then Send: Kiln calls the endpoint on the running app and shows the status, time, headers and body.
+  When the app is not running, Send starts its run configuration (uvicorn, npm start, dotnet run) and waits
+  until it listens. The endpoint runs as it does in your app - against the database the app is configured
+  with (a real one when its connection is set, otherwise the local one).
+- The **Endpoints** tool window lists every endpoint of the project; click one to send a request.
+
 **Git and GitHub**
 - Current branch and every local branch, with an × to delete (force-delete for unmerged branches after a
   second confirmation), checkout, new/rename/merge/rebase, fetch/pull/push.
@@ -217,6 +228,21 @@ breakpoint inside the test.
 
 ![Debugging an xUnit test](docs/screenshots/debug-test-dotnet.png)
 
+### HTTP endpoints
+
+**Send a request from the code.** The ▶ Send button above `create_note` opened this dialog; Send started the
+app (uvicorn) and called `POST /notes`, which inserted the note into the app's SQLite database.
+
+![Calling a FastAPI endpoint](docs/screenshots/endpoint-request.png)
+
+**Endpoints tool window.** Every endpoint of the project, with the Send buttons above each method in the editor.
+
+![Endpoints tool window](docs/screenshots/endpoints.png)
+
+**ASP.NET Core.** The same for a minimal API: Send started `dotnet run` and called `GET /weatherforecast`.
+
+![Calling an ASP.NET Core endpoint](docs/screenshots/endpoint-aspnet.png)
+
 ### Git and GitHub
 
 **Branches.** The branch popup: update, commit, push, new branch, fetch, and every local branch with an × to
@@ -364,7 +390,8 @@ configurations, the terminal, commits, branch deletion, stashes, merge conflict 
 Find Usages, refactorings in Python, C# (including Roslyn through csharp-ls) and JavaScript, running and
 debugging tests from the gutter with coverage (pytest, node:test, xUnit), split editors and pinned tabs, committing
 individual lines and the Git log actions (tag, cherry-pick, revert, interactive rebase, reset), the AI
-features (inline completion, Generate Documentation / Tests, review, commit message, Explain Exception), the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
+features (inline completion, Generate Documentation / Tests, review, commit message, Explain Exception), calling
+FastAPI, Express and ASP.NET Core endpoints from the Send buttons, the knowledge graph, the Kafka flow diagram, debugging Python and C#, themes and the theme editor,
 keymap customization, Search Everywhere, Local History, skills and the knowledge-graph MCP server, installing
 the knowledge graph for agents (into a scratch home folder), the GitHub connection, and a live Claude edit. Screenshots go to
 `$TMPDIR/kiln-e2e-shots`.

@@ -513,3 +513,22 @@
 .review-row { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
 .review-row:hover { background: var(--bg-hover); }
 .review-row .icon { margin-top: 2px; flex: none; }
+
+/* Endpoints: request dialog, method badges, Endpoints tool window */
+.http-method { font: 600 10.5px var(--font-mono, 'JetBrains Mono', monospace); padding: 1px 5px; border-radius: 3px; color: #fff; background: #6C707E; flex: none; }
+.http-method.m-get { background: #3E8E5E; }
+.http-method.m-post { background: #C27A23; }
+.http-method.m-put, .http-method.m-patch { background: #3574F0; }
+.http-method.m-delete { background: #C0504D; }
+.endpoint-req { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.3fr); gap: 14px; min-height: 360px; }
+.endpoint-req textarea { width: 100%; resize: vertical; }
+.endpoint-param label .badge { font-size: 10px; }
+.endpoint-res { min-width: 0; border-left: 1px solid var(--border-inner); padding-left: 14px; }
+.endpoint-body { flex: 1; margin: 0; padding: 8px; overflow: auto; max-height: 48vh; background: var(--bg-editor); border: 1px solid var(--border-inner); border-radius: 4px; font: 12px var(--font-mono, 'JetBrains Mono', monospace); white-space: pre-wrap; word-break: break-word; }
+.endpoint-headers { font-size: 12px; margin-bottom: 6px; }
+.endpoint-headers pre { margin: 4px 0; font-size: 11px; white-space: pre-wrap; color: var(--text-secondary); }
+.http-status { font-weight: 600; padding: 1px 7px; border-radius: 3px; }
+.http-status.ok { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.http-status.redirect { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.http-status.fail { color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent); }
+.endpoint-row { gap: 8px; }

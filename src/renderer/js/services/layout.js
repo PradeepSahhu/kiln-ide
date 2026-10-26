@@ -18,6 +18,7 @@ export const TOOL_WINDOWS = {
     { id: 'usages', title: 'Find Usages', icon: 'usages', command: 'navigate.usages' },
     { id: 'todo', title: 'TODO', icon: 'todo', command: 'view.todo' },
     { id: 'packages', title: 'Packages', icon: 'package', command: 'view.packages' },
+    { id: 'endpoints', title: 'Endpoints', icon: 'web', command: 'view.endpoints' },
   ],
   right: [
     { id: 'claude', title: 'Claude', icon: 'claude', command: 'view.claude' },

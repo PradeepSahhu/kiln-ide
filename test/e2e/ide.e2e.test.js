@@ -157,6 +157,8 @@ before(async () => {
   win = await app.firstWindow();
   win.on('pageerror', (err) => console.error('[renderer error]', err.message));
   await win.waitForSelector(sel('welcome'), { timeout: 60000 });
+  // Ghost text from the AI test answers would get in the way elsewhere; its own test turns it on.
+  await win.evaluate(() => window.kiln.invoke('app:updateSettings', { ai: { inlineCompletion: false } }));
 });
 
 // A dialog left open by an earlier (failed) test would block this one: report it and close it, so
@@ -594,6 +596,7 @@ test('AI features: inline completion, Generate Documentation and Tests with a pr
   const dir = path.join(workspace, 'e2e_py');
   const file = path.join(dir, 'ai_demo.py');
   fs.writeFileSync(file, 'def square(x):\n    \n');
+  await win.evaluate(() => window.kiln.invoke('app:updateSettings', { ai: { inlineCompletion: true } }));
   await kiln('openFile', file, 2, 5);
   // Inline completion: ghost text at the caret, Tab accepts it.
   await run('ai.completeHere');
@@ -602,6 +605,7 @@ test('AI features: inline completion, Generate Documentation and Tests with a pr
   await win.keyboard.press('Tab');
   await waitFor(async () => /def square\(x\):\n {4}return x \* x/.test(await kiln('getActiveContent')), { message: 'completion accepted' });
   await run('file.save');
+  await win.evaluate(() => window.kiln.invoke('app:updateSettings', { ai: { inlineCompletion: false } }));
 
   // Generate Documentation: a preview, then the docstring is in the file.
   await kiln('openFile', file, 2, 5);
@@ -1053,4 +1057,135 @@ test('tests (.NET xUnit): Debug Test attaches to the test host and stops in the 
   const calc = find(dir, 'Calculator.cs');
   await waitFor(async () => Number(await win.getAttribute(sel('coverage-row', `[data-path="${calc}"]`), 'data-percent').catch(() => -1)) === 100, { timeout: 400000, message: 'Calculator.cs covered (coverlet)' });
   await waitFor(async () => (await outcome('E2eLib.Tests.CalculatorTests.Add_ReturnsSum')) === 'passed', { message: 'xUnit test passed' });
+});
+
+/** Click the Send button (code lens) above an endpoint (`code`: a line of it, scrolled into view). */
+async function sendLens(label, code) {
+  // Code lenses outside the visible lines are not shown; a reload of the file (written by the test)
+  // scrolls to the change, so reveal the endpoint until its button shows.
+  const lens = win.locator(`.codelens-decoration a:has-text("${label}")`).locator('visible=true').first();
+  await waitFor(async () => {
+    await kiln('revealText', code);
+    return lens.isVisible();
+  }, { timeout: 60000, interval: 500, message: `the ${label} button` });
+  await lens.click();
+  await win.waitForSelector(sel('endpoint-dialog'));
+}
+const status = () => win.getAttribute(sel('endpoint-response'), 'data-status');
+
+test('endpoints (FastAPI): Send above each endpoint calls the running app, which reads and writes its database', { timeout: 600000 }, async () => {
+  const { dir } = await createProject('python-fastapi', 'e2e_api');
+  await waitBuild('success');
+  const main = path.join(dir, 'main.py');
+  fs.writeFileSync(main, `"""Notes API."""
+import os
+import sqlite3
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+app = FastAPI(title="notes")
+# The database the app is configured with; a local SQLite file when none is.
+DB = os.environ.get("NOTES_DB", "notes.db")
+
+
+def db():
+    con = sqlite3.connect(DB)
+    con.execute("create table if not exists notes (id integer primary key, text text not null)")
+    return con
+
+
+class Note(BaseModel):
+    text: str
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.post("/notes")
+def create_note(note: Note):
+    with db() as con:
+        cur = con.execute("insert into notes (text) values (?)", (note.text,))
+        return {"id": cur.lastrowid, "text": note.text}
+
+
+@app.get("/notes/{note_id}")
+def read_note(note_id: int):
+    with db() as con:
+        row = con.execute("select id, text from notes where id = ?", (note_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"id": row[0], "text": row[1]}
+`);
+  await kiln('openFile', main, 1, 1);
+  // POST: the app is not running yet - Send starts it, then calls the endpoint.
+  await sendLens('Send POST /notes', '@app.post("/notes")');
+  await waitFor(async () => /starts/.test(await win.textContent(sel('endpoint-target'))), { message: 'the dialog says the app will be started' });
+  assert.match(await win.inputValue(sel('endpoint-body')), /"text": "string"/, 'example body from the model');
+  await win.fill(sel('endpoint-body'), '{"text": "hello from kiln"}');
+  await win.click(sel('endpoint-send'));
+  await waitFor(async () => (await status()) === '200', { timeout: 180000, message: 'POST /notes answered' });
+  assert.match(await win.textContent(sel('endpoint-response-body')), /"id": 1[\s\S]*hello from kiln/);
+  await shot('29-endpoint-post');
+  const rows = execFileSync('python3', ['-c', 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("select text from notes").fetchall())', path.join(dir, 'notes.db')], { encoding: 'utf8' });
+  assert.match(rows, /hello from kiln/, 'the row is in the database');
+  await win.keyboard.press('Escape');
+
+  // GET with a path parameter, on the app that is now running.
+  await sendLens('Send GET /notes/{note_id}', '@app.get("/notes/{note_id}")');
+  await waitFor(async () => /Sends to http/.test(await win.textContent(sel('endpoint-target'))), { message: 'the running app is found' });
+  await win.fill(sel('endpoint-param-note_id'), '1');
+  await win.click(sel('endpoint-send'));
+  await waitFor(async () => (await status()) === '200', { timeout: 30000, message: 'GET /notes/1' });
+  assert.match(await win.textContent(sel('endpoint-response-body')), /hello from kiln/);
+  await win.fill(sel('endpoint-param-note_id'), '999');
+  await win.click(sel('endpoint-send'));
+  await waitFor(async () => (await status()) === '404', { timeout: 30000, message: 'GET /notes/999 is a 404' });
+  await win.keyboard.press('Escape');
+
+  await run('view.endpoints');
+  await waitFor(async () => (await win.$$(sel('endpoint-row'))).length >= 3, { message: 'Endpoints tool window' });
+  assert.deepEqual(await win.$$eval(sel('endpoint-row'), (els) => els.map((e) => `${e.dataset.method} ${e.dataset.path}`)), ['GET /health', 'POST /notes', 'GET /notes/{note_id}']);
+  await shot('30-endpoints');
+  await run('run.stop');
+});
+
+test('endpoints (Express): Send starts npm start and calls the route with its path parameter', { timeout: 400000 }, async () => {
+  const { dir } = await createProject('node-express', 'e2e-express');
+  await waitBuild('success');
+  const server = path.join(dir, 'server.js');
+  await kiln('openFile', server, 1, 1);
+  await sendLens('Send GET /hello/:name', "app.get('/hello/:name'");
+  await win.fill(sel('endpoint-param-name'), 'kiln');
+  await win.click(sel('endpoint-send'));
+  await waitFor(async () => (await status()) === '200', { timeout: 120000, message: 'GET /hello/kiln' });
+  assert.match(await win.textContent(sel('endpoint-response-body')), /Hello, kiln!/);
+  await win.keyboard.press('Escape');
+  await run('run.stop');
+});
+
+test('endpoints (ASP.NET Core): Send starts dotnet run and calls the minimal API', { skip: !has('dotnet'), timeout: 600000 }, async () => {
+  const { dir } = await createProject('dotnet-webapi', 'E2eApi');
+  await waitBuild('success');
+  const program = (function find(d) {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isFile() && e.name === 'Program.cs') return p;
+      if (e.isDirectory() && !/^(bin|obj|\.git)$/.test(e.name)) {
+        const f = find(p);
+        if (f) return f;
+      }
+    }
+    return null;
+  })(dir);
+  await kiln('openFile', program, 1, 1);
+  await sendLens('Send GET /weatherforecast', 'app.MapGet("/weatherforecast"');
+  await win.click(sel('endpoint-send'));
+  await waitFor(async () => (await status()) === '200', { timeout: 300000, message: 'GET /weatherforecast' });
+  assert.match(await win.textContent(sel('endpoint-response-body')), /temperatureC/);
+  await shot('31-endpoint-aspnet');
+  await win.keyboard.press('Escape');
+  await run('run.stop');
 });

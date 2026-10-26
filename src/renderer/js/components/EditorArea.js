@@ -13,6 +13,7 @@ import { renderMarkdown, enhanceCodeBlocks } from '../lib/markdown.js';
 import * as ed from '../services/editor.js';
 import { registerLanguageFeatures } from '../services/lang.js';
 import { registerInlineCompletion } from '../services/ai.js';
+import { registerEndpointLenses } from '../services/endpoints.js';
 import { KnowledgeGraphView } from './views/Graph.js';
 import { MessageFlowView } from './views/Flow.js';
 import { MergeView } from './views/Merge.js';
@@ -165,6 +166,7 @@ function EditorGroup({ gid }) {
       if (!alive) return;
       registerLanguageFeatures(ed.getMonaco());
       registerInlineCompletion(ed.getMonaco());
+      registerEndpointLenses(ed.getMonaco());
       setReady(true);
       window.__kilnEditorReady = true;
     });

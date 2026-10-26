@@ -9,6 +9,7 @@ const { parseDotEnv } = require('./detect');
 const { resolveInterpreter, pythonEnv, scriptPath } = require('./python-env');
 const { Batcher, loadPty } = require('./terminal');
 const { dotnetAuth } = require('./github-auth');
+const { urlsIn } = require('./http-client');
 
 function splitArgs(s) {
   const out = [];
@@ -123,9 +124,20 @@ class RunService {
       this.ctx.send('run:exit', { id, code: -1 });
       return { id, error: err.message };
     }
-    const session = { id, cfg, pty: p, running: true, startedAt: Date.now() };
+    const session = { id, cfg, cwd: spec.cwd, pty: p, running: true, startedAt: Date.now(), urls: [], tail: '' };
     const batch = new Batcher((data) => this.ctx.send('run:data', { id, data }));
-    p.onData((d) => batch.push(d));
+    p.onData((d) => {
+      batch.push(d);
+      // The address a server prints when it starts (for the endpoint Send buttons).
+      if (session.urls.length < 4) {
+        session.tail = (session.tail + d).slice(-4000);
+        for (const u of urlsIn(session.tail)) {
+          if (session.urls.includes(u)) continue;
+          session.urls.push(u);
+          this.ctx.send('run:url', { id, url: u });
+        }
+      }
+    });
     p.onExit(({ exitCode, signal }) => {
       batch.flush();
       session.running = false;
@@ -179,6 +191,11 @@ class RunService {
         /* exited */
       }
     }
+  }
+
+  /** Running sessions with the addresses they listen on: [{ id, cfg, cwd, urls }]. */
+  servers() {
+    return [...this.sessions.values()].filter((s) => s.running && s.urls.length).map((s) => ({ id: s.id, cfg: s.cfg, cwd: s.cwd, urls: s.urls.slice() }));
   }
 
   forget(id) {

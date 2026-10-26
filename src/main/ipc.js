@@ -466,6 +466,16 @@ function register({ getContext, createWindow, rebuildMenu, broadcast }) {
   handle('ai:generateTests', (ctx, req) => ctx.ai.generateTests(req || {}));
   handle('ai:stackContext', (ctx, text) => require('./services/stack-context').stackContext(text, { root: ctx.root }));
 
+  // ------------------------------------------------------- endpoints
+  handle('endpoints:list', (ctx) => (ctx.root ? ctx.endpoints.list() : []));
+  handle('endpoints:forFile', (ctx, file, text) => (ctx.root ? ctx.endpoints.forFile(file, text) : []));
+  handle('endpoints:server', (ctx, endpoint) => {
+    const s = ctx.endpoints.server(endpoint);
+    const cfg = s ? null : ctx.endpoints.configFor(endpoint);
+    return { server: s, config: cfg ? { id: cfg.id, name: cfg.name } : null };
+  });
+  handle('endpoints:send', (ctx, req) => ctx.endpoints.send(req || {}));
+
   // ------------------------------------------------ message flow/kafka
   handle('flow:analyze', (ctx) => analyzeFlow(ctx));
   handle('kafka:connect', (ctx, opts) => ctx.kafka.connect(opts));

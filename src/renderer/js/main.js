@@ -383,6 +383,15 @@ function exposeTestApi() {
         await ed.openFile(path, { line, col, endLine, endCol });
         return true;
       },
+      // Scroll the active editor to the first line containing `text`.
+      revealText: (text) => {
+        const e = ed.getEditor();
+        const m = e && e.getModel();
+        const match = m && text ? m.findMatches(text, false, false, true, null, false)[0] : null;
+        if (!match) return false;
+        e.revealLineInCenter(match.range.startLineNumber);
+        return true;
+      },
       // Text shown by each split's editor, in layout order.
       groupTexts: () => ed.layoutGroups().map((g) => {
         const t = store.get().editor.tabs.find((x) => x.id === (store.get().editor.groups.find((y) => y.id === g) || {}).active);
